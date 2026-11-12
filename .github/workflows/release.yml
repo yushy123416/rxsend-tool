@@ -1,0 +1,34 @@
+name: Build and draft release
+on:
+  push:
+    tags: ['v*']
+permissions:
+  contents: write
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and verify
+        shell: pwsh
+        run: |
+          ./build.ps1 -Test
+          ./tests/UpdateSmoke.ps1
+          $version=[Reflection.AssemblyName]::GetAssemblyName((Resolve-Path './dist/RXSendTool.exe')).Version.ToString(3)
+          if ($env:GITHUB_REF_NAME -ne "v$version") { throw 'Tag and executable version differ' }
+          ./publish-manifest.ps1 -Repository $env:GITHUB_REPOSITORY -UsePrepared
+          ./release-notes.ps1 -Repository $env:GITHUB_REPOSITORY -Version $version
+      - name: Create draft release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $version=$env:GITHUB_REF_NAME.TrimStart('v')
+          $zip=Get-Item "./dist/RxToolbox-$version-Windows.zip"
+          gh release view $env:GITHUB_REF_NAME --repo $env:GITHUB_REPOSITORY --json id 2>$null
+          if ($LASTEXITCODE -ne 0) {
+            gh release create $env:GITHUB_REF_NAME --verify-tag --draft --title "RXSend Tool $env:GITHUB_REF_NAME" --notes-file ./build/release-notes.md
+            if ($LASTEXITCODE -ne 0) { throw 'Draft release creation failed' }
+          }
+          gh release upload $env:GITHUB_REF_NAME ./dist/RXSendTool.exe $zip.FullName ./dist/update.json --clobber
+          if ($LASTEXITCODE -ne 0) { throw 'Draft release creation failed' }

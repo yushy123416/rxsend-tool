@@ -1,0 +1,49 @@
+# 本地文档、设计草图和未采用的参考素材
+/docs/
+/assets/design/
+/assets/branding/scp-reference.png
+/assets/branding/rxsend-wiki-source.svg
+/assets/branding/rxsend-wiki-reference.png
+
+# 编译、发布产物与本机分析文件
+# updates/ 是供 Gitee 自动镜像同步的正式更新载荷，须随源码提交
+/build/
+/dist/
+**/bin/
+**/obj/
+/artifacts/
+/output/
+/tmp/
+/temp/
+
+# 编辑器、用户设置和临时文件
+/.vs/
+/.idea/
+/.vscode/
+/.codex/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+*.log
+*.tmp
+*.bak
+*.swp
+*.swo
+*~
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# Python 资源制作缓存与虚拟环境
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+
+# 本地凭据和环境配置，保留可公开的示例
+.env
+.env.*
+!.env.example
+!.env.sample
