@@ -72,23 +72,24 @@ namespace RxToolbox {
   public SettingsModule(ToolContext c):base(c){
    Header("设置与更新","");
    var card=new CardPanel{Location=new System.Drawing.Point(0,124),Size=new System.Drawing.Size(936,172)};Page.Controls.Add(card);
-   Ui.Label(card,"RXSend Tool",24,20,500,34,Ui.Heading);
+   Ui.Label(card,"RXSend Tool",24,20,500,34,Ui.Heading);Ui.Label(card,"启动后自动检查更新，有新版本时自动下载、校验并重启。",24,65,700,30,Ui.Small,Ui.Muted);
    check=Ui.Button(card,"检查更新",752,26,160,delegate{if(payload!=null)Install();else if(pending!=null)Download();else Check();},true);
    updateStatus=Ui.Label(card,"",24,107,888,44,Ui.Small,Ui.Muted);
    var license=new CardPanel{Location=new System.Drawing.Point(0,316),Size=new System.Drawing.Size(936,96)};Page.Controls.Add(license);
-   Ui.Label(license,"GNU GPL v3.0",24,16,500,30,Ui.Heading);Ui.Label(license,"Copyright © 2026 yushy",24,51,600,26,Ui.Small,Ui.Muted);Ui.Button(license,"查看许可证",752,29,160,License);
+   Ui.Label(license,"GNU GPL v3.0",24,16,500,30,Ui.Heading);Ui.Button(license,"查看许可证",752,29,160,License);
   }
-  async void Check(){
+  async void Check(bool automatic=false){
    if(busy)return;
    if(string.IsNullOrWhiteSpace(C.Settings.GithubRepo)&&string.IsNullOrWhiteSpace(C.Settings.MirrorUrl)){updateStatus.Text="暂未配置可用更新源";return;}
    busy=true;check.Enabled=false;pending=null;payload=null;updateStatus.Text="正在检查更新…";string repo=C.Settings.GithubRepo,mirror=C.Settings.MirrorUrl;
-   try{var result=await Task.Run(()=>Updates.Check(repo,mirror));if(Page.IsDisposed)return;if(Updates.ParseVersion(result.version)>Updates.Current){pending=result;updateStatus.Text="发现新版本 "+result.version;check.Text="下载更新";}else updateStatus.Text="已是最新版本";}
-   catch(Exception ex){if(!Page.IsDisposed)updateStatus.Text=ex.Message;}
+   try{var result=await Task.Run(()=>Updates.Check(repo,mirror));if(Page.IsDisposed)return;if(Updates.ParseVersion(result.version)>Updates.Current){pending=result;updateStatus.Text="发现新版本 "+result.version;check.Text="下载更新";if(automatic){updateStatus.Text="发现新版本 "+result.version+"，正在自动下载并校验…";C.Window.SetStatus(updateStatus.Text);payload=await Task.Run(()=>Updates.Download(result));if(Page.IsDisposed)return;updateStatus.Text="校验通过，正在安装并重启…";C.Window.SetStatus(updateStatus.Text);Install();}}else updateStatus.Text="已是最新版本";}
+   catch(Exception ex){if(!Page.IsDisposed){updateStatus.Text=ex.Message;if(automatic)C.Window.SetStatus("自动更新未完成："+ex.Message);}}
    finally{busy=false;if(!Page.IsDisposed)check.Enabled=true;}
   }
   async void Download(){if(busy||pending==null)return;busy=true;check.Enabled=false;updateStatus.Text="正在下载并校验…";var manifest=pending;try{payload=await Task.Run(()=>Updates.Download(manifest));if(Page.IsDisposed)return;updateStatus.Text="校验通过，可以安装";check.Text="安装并重启";}catch(Exception ex){if(!Page.IsDisposed)updateStatus.Text=ex.Message;}finally{busy=false;if(!Page.IsDisposed)check.Enabled=true;}}
-  void Install(){if(payload==null||pending==null)return;try{C.Save();Updates.Install(payload,pending);C.Window.ExitForUpdate();}catch(Exception ex){updateStatus.Text=ex.Message;}}
-  public override void Tick(){if(!autoStarted){autoStarted=true;if(C.Settings.AutoCheck&&(!string.IsNullOrWhiteSpace(C.Settings.GithubRepo)||!string.IsNullOrWhiteSpace(C.Settings.MirrorUrl)))Check();}}
+  void Install(){if(payload==null||pending==null)return;try{C.Save();Updates.Install(payload,pending);C.Window.ExitForUpdate();}catch(Exception ex){updateStatus.Text=ex.Message;C.Window.SetStatus("更新安装未完成："+ex.Message);}}
+  internal void StartAutoUpdate(){if(autoStarted)return;autoStarted=true;Check(true);}
+  public override void Tick(){}
   static string LicenseText(string file,string resource){string path=Path.Combine(AppDomain.CurrentDomain.BaseDirectory,file);if(File.Exists(path))return File.ReadAllText(path);using(var stream=Assembly.GetExecutingAssembly().GetManifestResourceStream(resource)){if(stream==null)return "";using(var reader=new StreamReader(stream))return reader.ReadToEnd();}}
   void License(){using(var f=new Form{Text="开源许可 · GPL-3.0",Size=new System.Drawing.Size(760,580),StartPosition=FormStartPosition.CenterParent}){var t=new TextBox{Multiline=true,ReadOnly=true,Dock=DockStyle.Fill,ScrollBars=ScrollBars.Vertical,BackColor=Ui.Card,ForeColor=Ui.Text,Font=Ui.Body};t.Text="RX Toolbox · GPL-3.0-only\r\nCopyright (c) 2026 yushy\r\n\r\n"+LicenseText("LICENSE","RxToolbox.LICENSE")+"\r\n\r\n"+LicenseText("THIRD-PARTY-NOTICES.md","RxToolbox.NOTICES");f.Controls.Add(t);f.ShowDialog(C.Window);}}
  }

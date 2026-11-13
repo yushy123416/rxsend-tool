@@ -1,5 +1,7 @@
 # 本地文档、设计草图和未采用的参考素材
-/docs/
+/docs/*
+!/docs/nvidia-filter-compatibility.md
+/CHANGELOG.md
 /assets/design/
 /assets/branding/scp-reference.png
 /assets/branding/rxsend-wiki-source.svg

@@ -1,9 +1,9 @@
 {
-  "version": "1.0.0",
-  "url": "https://gitee.com/ysyyyy/rxsend-tool/raw/main/updates/v1.0.0/RXSendTool.exe",
-  "sha256": "754150b5a5c597d6ec3b9f5214be2adb61c4e02d5d2ba94d3308caefc060783b",
+  "version": "1.0.1",
+  "url": "https://gitee.com/ysyyyy/rxsend-tool/raw/main/updates/v1.0.1/RXSendTool.exe",
+  "sha256": "56cd5d4081a71343932ef8f714181e172f2b9597cc0ffc2e8de3ed2ccf703e6f",
   "mirrors": [
-    "https://github.com/yushy123416/rxsend-tool/releases/download/v1.0.0/RXSendTool.exe"
+    "https://github.com/yushy123416/rxsend-tool/releases/download/v1.0.1/RXSendTool.exe"
   ],
-  "notes": "RXSend Tool 1.0.0"
+  "notes": "RXSend Tool 1.0.1"
 }

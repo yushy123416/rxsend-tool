@@ -11,17 +11,58 @@ using System.Threading.Tasks;
 namespace RxToolbox {
  internal static class Tests {
   static int count;
+  sealed class FakeNvidia : INvidiaProfileApi {
+   public string Name="Garry's Mod",Registered="game.exe",DeletedApplication;public bool Mapped=true,HasProfile=true,FailSave;public int Saves;public IntPtr ApplicationProfile=new IntPtr(1);
+   public readonly System.Collections.Generic.List<string> Calls=new System.Collections.Generic.List<string>();
+   public readonly System.Collections.Generic.Dictionary<uint,NvidiaSettingBackup> Values=new System.Collections.Generic.Dictionary<uint,NvidiaSettingBackup>();
+   public IntPtr Application(string path,out string registered){registered=Registered;return Mapped?ApplicationProfile:IntPtr.Zero;}
+   public IntPtr Profile(string name){return HasProfile?new IntPtr(1):IntPtr.Zero;}
+   public string ProfileName(IntPtr profile){return Name;}
+   public IntPtr CreateProfile(string name){Name=name;HasProfile=true;Calls.Add("create");return new IntPtr(1);}
+   public void AddApplication(IntPtr profile,string path){Mapped=true;Registered=path;Calls.Add("add");}
+   public void DeleteApplication(IntPtr profile,string name){Mapped=false;DeletedApplication=name;Calls.Add("remove");}
+   public NvidiaSettingBackup Read(IntPtr profile,uint id){NvidiaSettingBackup s;return Values.TryGetValue(id,out s)?new NvidiaSettingBackup{Id=id,Value=s.Value,UserValue=s.UserValue}:new NvidiaSettingBackup{Id=id};}
+   public void Write(IntPtr profile,uint id,uint value){Values[id]=new NvidiaSettingBackup{Id=id,Value=value,UserValue=true};Calls.Add("write");}
+   public void DeleteSetting(IntPtr profile,uint id){Values.Remove(id);Calls.Add("delete");}
+   public void Save(){Calls.Add("save");if(FailSave)throw new IOException("driver save failed");Saves++;}
+  }
+  static void NvidiaChecks(){
+   Check(System.Runtime.InteropServices.Marshal.SizeOf(typeof(NvidiaApi.DrsSetting))==12320&&System.Runtime.InteropServices.Marshal.OffsetOf(typeof(NvidiaApi.DrsSetting),"Current").ToInt32()==8220,"NVAPI setting ABI matches NVIDIA header including both 4100-byte unions");
+   Check(System.Runtime.InteropServices.Marshal.SizeOf(typeof(NvidiaApi.DrsApplication))==20492&&System.Runtime.InteropServices.Marshal.SizeOf(typeof(NvidiaApi.DrsProfile))==4116,"NVAPI application v4 and profile ABI match NVIDIA headers");
+   var api=new FakeNvidia();api.Values[NvidiaFilters.SettingIds[0]]=new NvidiaSettingBackup{Id=NvidiaFilters.SettingIds[0],Value=7,UserValue=true};
+   NvidiaFilterBackup snapshot=null;NvidiaFilters.StageApply(api,"game.exe",b=>{snapshot=b;api.Calls.Add("backup");});
+   Check(api.Calls[0]=="backup"&&api.Saves==1&&snapshot.Settings[0].Value==7&&snapshot.Settings[0].UserValue,"original user override backed up before any driver writes");
+   Check(NvidiaFilters.SettingIds.All(id=>api.Values[id].Value==1),"all three permissions staged and saved together");
+   NvidiaFilters.StageRestore(api,snapshot);Check(api.Values.Count==1&&api.Values[NvidiaFilters.SettingIds[0]].Value==7&&api.Saves==2,"restore preserves custom value and removes overrides for inherited defaults");
+   api=new FakeNvidia{Name="Half-Life 2"};Reject(()=>NvidiaFilters.StageApply(api,"game.exe",b=>{}),"shared other-game driver profile cannot be modified");Check(api.Calls.Count==0,"rejected shared profile produces no mutations");
+   api=new FakeNvidia();Reject(()=>NvidiaFilters.StageApply(api,"game.exe",b=>{throw new IOException("disk full");}),"backup persistence failure aborts configuration");Check(api.Calls.Count==0,"failed backup prevents application changes and driver save");
+   api=new FakeNvidia{Mapped=false,HasProfile=false};NvidiaFilters.StageApply(api,"game.exe",b=>snapshot=b);Check(api.Name==NvidiaFilters.OwnProfile&&snapshot.AddedApplication=="game.exe"&&api.Calls.IndexOf("add")<api.Calls.IndexOf("save"),"unmapped executable gets a dedicated GMod profile and recoverable association");
+   NvidiaFilters.StageRestore(api,snapshot);Check(!api.Mapped&&api.Values.Count==0,"restore removes only the application association added by toolbox");
+   const string originalPath=@"E:\SteamLibrary\steamapps\common\GarrysMod\gmod_win64.exe";
+   const string driverPath="e:/steamlibrary/steamapps/common/garrysmod/gmod_win64.exe";
+   api=new FakeNvidia{Mapped=false};NvidiaFilters.StageApply(api,originalPath,b=>snapshot=b);api.Registered=driverPath;
+   NvidiaFilters.StageRestore(api,snapshot);Check(!api.Mapped&&api.Values.Count==0&&api.DeletedApplication==driverPath,"restore accepts real DRS path normalization and deletes using the exact registered name");
+   var normalizedBackup=Json.Read<NvidiaFilterBackup>(Json.Write(snapshot));normalizedBackup.AddedApplication=driverPath;NvidiaFilters.ValidateBackup(normalizedBackup);Check(true,"existing backup remains valid with either Windows or DRS path separators");
+   api=new FakeNvidia{Mapped=false};NvidiaFilters.StageApply(api,originalPath,b=>snapshot=b);api.Registered="e:/other/garrysmod/gmod_win64.exe";api.Calls.Clear();Reject(()=>NvidiaFilters.StageRestore(api,snapshot),"same executable name in another folder still blocks restoration");Check(api.Calls.Count==0,"different full path cannot trigger any restore mutations");
+   api.Registered=driverPath;api.ApplicationProfile=new IntPtr(2);Reject(()=>NvidiaFilters.StageRestore(api,snapshot),"changed driver profile still blocks restoration despite matching normalized path");Check(api.Calls.Count==0,"changed profile cannot trigger any restore mutations");
+   api=new FakeNvidia{FailSave=true};snapshot=null;Reject(()=>NvidiaFilters.StageApply(api,"game.exe",b=>snapshot=b),"driver save failure is surfaced");Check(snapshot!=null&&!snapshot.Applied&&api.Saves==0,"save failure retains the original recovery snapshot");
+   api=new FakeNvidia();NvidiaFilters.StageApply(api,"game.exe",b=>snapshot=b);api.Values[NvidiaFilters.SettingIds[2]].Value=9;api.Calls.Clear();Reject(()=>NvidiaFilters.StageRestore(api,snapshot),"restore refuses later edits by another tool");Check(api.Calls.Count==0,"conflict detection completes before restore mutations");
+   var invalid=Json.Read<NvidiaFilterBackup>(Json.Write(snapshot));invalid.Settings[0].Id=123;Reject(()=>NvidiaFilters.ValidateBackup(invalid),"backup cannot target arbitrary driver settings");
+   invalid=Json.Read<NvidiaFilterBackup>(Json.Write(snapshot));invalid.Settings[0]=null;Reject(()=>NvidiaFilters.ValidateBackup(invalid),"null backup entries are rejected");Reject(()=>NvidiaFilters.ResultPath("../../other"),"helper result token cannot escape the settings directory");
+   string fixture=Path.Combine(Path.GetTempPath(),"rx-nvidia-"+Guid.NewGuid().ToString("N"));Directory.CreateDirectory(fixture);
+   try{string game=Path.Combine(fixture,"gmod_win64.exe");File.WriteAllText(game,"");Reject(()=>NvidiaFilters.ValidateGame(game),"matching executable name alone cannot identify a GMod installation");Directory.CreateDirectory(Path.Combine(fixture,"garrysmod"));File.WriteAllText(Path.Combine(fixture,"garrysmod","gameinfo.txt"),"GameInfo {}");Check(NvidiaFilters.ValidateGame(game)==game,"GMod executable is validated using its installation marker");Directory.CreateDirectory(Path.Combine(fixture,"steamapps"));File.WriteAllText(Path.Combine(fixture,"steamapps","libraryfolders.vdf"),"\"libraryfolders\" { \"0\" { \"path\" \"E:\\\\SteamLibrary\" } \"1\" { \"path\" \"E:\\\\SteamLibrary\" } }");var libraries=NvidiaFilters.LibraryPaths(fixture).ToArray();Check(libraries.Length==2&&libraries[1]==@"E:\SteamLibrary","Steam library discovery decodes VDF paths and removes duplicates");}finally{Directory.Delete(fixture,true);}
+  }
   static async Task AutoJoinChecks(){
    var clock=new DateTime(2026,11,12,0,0,0,DateTimeKind.Utc);var server=new ServerEntry{Host="127.0.0.1",Port=27015,Name="测试服"};int queries=0,launches=0;string launched=null;var response=new A2sInfo{Players=70,MaxPlayers=70};
    using(var join=new AutoJoinService((h,p)=>{queries++;return response;},uri=>{launches++;launched=uri;},()=>clock)){
     join.Start(server);await join.PollAsync();Check(join.Running&&launches==0&&queries==1,"auto join waits while server is full");
-    await join.PollAsync();Check(queries==1,"auto join enforces five-second query interval");
-    clock=clock.AddSeconds(5);response=new A2sInfo{Players=69,MaxPlayers=70};await join.PollAsync();await join.PollAsync();Check(!join.Running&&launches==1&&launched=="steam://connect/127.0.0.1:27015","auto join launches exactly once when a fresh query finds a slot");
+    await join.PollAsync();Check(queries==1,"auto join enforces one-second query interval");
+    clock=clock.AddSeconds(1);response=new A2sInfo{Players=69,MaxPlayers=70};await join.PollAsync();await join.PollAsync();Check(!join.Running&&launches==1&&launched=="steam://connect/127.0.0.1:27015","auto join launches exactly once when a fresh query finds a slot");
    }
    queries=0;launches=0;
    using(var join=new AutoJoinService((h,p)=>{queries++;if(queries==1)throw new IOException("timeout");return new A2sInfo{Players=1,MaxPlayers=2};},uri=>launches++,()=>clock)){
     join.Start(server);await join.PollAsync();Check(join.Running&&launches==0,"query failures keep waiting without launching");
-    clock=clock.AddSeconds(5);await join.PollAsync();Check(launches==1&&!join.Running,"auto join recovers on a later valid query");
+    clock=clock.AddSeconds(1);await join.PollAsync();Check(launches==1&&!join.Running,"auto join recovers on a later valid query");
    }
    launches=0;
    using(var join=new AutoJoinService((h,p)=>new A2sInfo{Players=0,MaxPlayers=0},uri=>launches++,()=>clock)){join.Start(server);await join.PollAsync();Check(join.Running&&launches==0,"unknown capacity never triggers auto join");join.Stop();}
@@ -39,21 +80,34 @@ namespace RxToolbox {
    }
    launches=0;
    using(var join=new AutoJoinService((h,p)=>new A2sInfo{Players=1,MaxPlayers=2},uri=>{launches++;throw new IOException("Steam missing");},()=>clock)){join.Start(server);await join.PollAsync();clock=clock.AddSeconds(10);await join.PollAsync();Check(!join.Running&&launches==1&&join.Status.Contains("无法发起进服"),"Steam launch failure stops rather than repeatedly launching");}
+   launches=0;
+   using(var join=new AutoJoinService((h,p)=>new A2sInfo{Players=1,MaxPlayers=2},uri=>System.Threading.Interlocked.Increment(ref launches),()=>clock)){
+    join.Start(new[]{server,new ServerEntry{Host="127.0.0.2",Port=27016,Name="第二目标"}});await join.PollAsync();Check(launches==1&&!join.Running,"simultaneous available targets claim exactly one connection");
+   }
    Reject(()=>SteamConnect.BuildUri("127.0.0.1;+quit",27015),"reject command injection in connection target");
    Reject(()=>SteamConnect.BuildUri("127.0.0.1",0),"reject invalid game port");
    Check(SteamConnect.BuildUri("::1",27015)=="steam://connect/[::1]:27015","IPv6 connection target is bracketed");
+   var direct=SteamConnect.BuildStartInfo(SteamConnect.BuildUri("127.0.0.1",27015));
+   Check(direct.UseShellExecute&&direct.FileName=="steam://rungame/4000/76561202255233023/%2Bconnect%20127.0.0.1%3A27015"&&direct.Arguments=="","Steam uses Neobreach rungame protocol to request GMod connection");
+   var fallback=SteamConnect.BuildStartInfo(SteamConnect.BuildUri("::1",27015));
+   Check(fallback.UseShellExecute&&fallback.FileName=="steam://rungame/4000/76561202255233023/"+Uri.EscapeDataString("+connect [::1]:27015"),"rungame protocol preserves IPv6 connect arguments");
+   Reject(()=>SteamConnect.BuildStartInfo("steam://connect/127.0.0.1:27015 +quit"),"launch rejects injected arguments");
   }
   static void Check(bool ok,string name){if(!ok)throw new Exception(name);count++;Console.WriteLine("PASS "+name);}
   static void Reject(Action action,string name){try{action();}catch{Check(true,name);return;}throw new Exception("Expected rejection: "+name);}
   static string Encode(byte[] b,bool legacy){b[0]=(byte)(b.Skip(1).Sum(x=>(int)x)&255);BigInteger n=0;foreach(byte x in b)n=(n<<8)+x;const string a="ABCDEFGHJKLMNOPQRSTUVWXYZabcdefhijkmnopqrstuvwxyz23456789";var s=new StringBuilder();int len=legacy?25:44;for(int i=0;i<len;i++){s.Append(a[(int)(n%57)]);n/=57;}return legacy?"CSGO-"+string.Join("-",Enumerable.Range(0,5).Select(i=>s.ToString().Substring(i*5,5))):"CS"+s;}
   static byte[] InfoPacket(){using(var m=new MemoryStream())using(var w=new BinaryWriter(m)){w.Write(-1);w.Write((byte)0x49);w.Write((byte)17);foreach(string s in new[]{"测试服务器","rx_site","garrysmod","RXBreach"}){w.Write(Encoding.UTF8.GetBytes(s));w.Write((byte)0);}w.Write((ushort)4000);w.Write((byte)12);w.Write((byte)64);w.Write((byte)2);return m.ToArray();}}
   [STAThread]public static int Main(){try{
+   NvidiaChecks();
    var cs=CrosshairImport.Parse("CSvbPubOq37zTGqtsPTP5QTrp5CB4xFXiKRLfzJsm49ZRe");Check(cs.Red==255&&cs.Green==0&&cs.Blue==0&&cs.Length==5&&cs.Thickness==1&&cs.Dot&&cs.ReferenceHeight==768,"current CS2 reference vector");
    var old=CrosshairImport.Parse("CSGO-Cn37R-YE7vo-pLCAL-aURmZ-z6zkG");Check(old.Source.Contains("旧版"),"legacy CSGO reference vector");
    foreach(int version in new[]{3,4}){byte[] b=new byte[18];b[1]=(byte)version;b[2]=68;b[3]=20;b[4]=200;b[7]=3;b[8]=7;b[12]=128;b[14]=56;b[15]=4;var p=CrosshairImport.Parse(Encode(b,true));Check(p.Length==7&&p.Thickness==1&&p.ReferenceHeight==1080&&p.Dot,"legacy pixel v"+version);}
    byte[] signed=new byte[32];signed[1]=1;signed[4]=4;signed[13]=2;signed[14]=254;signed[15]=255;signed[16]=6;Check(CrosshairImport.Parse(Encode(signed,false)).Gap==-2,"signed CS2 gap");
    Reject(()=>CrosshairImport.Parse("CSvbPubOq37zTGqtsPTP5QTrp5CB4xFXiKRLfzJsm49ZRf"),"checksum corruption");Reject(()=>CrosshairImport.Parse("CSGO-AAAAA-AAAAA-AAAAA-AAAAA-AAAAg"),"invalid base57 alphabet");
    var val=CrosshairImport.Parse("0;s;1;P;c;5;h;0;0l;4;0o;2;0a;1;0f;0;1b;0;A;c;7;0l;20;S;c;4;o;1");Check(val.Red==0&&val.Green==255&&val.Blue==255&&val.Length==4&&val.Gap==2&&!val.Outer&&val.Outline==0,"VALORANT P section isolated from ADS and scope");
+   var sample=CrosshairImport.Parse("0;P;h;0;f;0;0t;1;0l;4;0o;1;0a;1;0f;0;1t;3;1o;2;1a;1;1m;0;1f;0");Check(sample.Length==4&&sample.Thickness==1&&sample.Gap==1&&sample.OuterThickness==3&&sample.OuterGap==2,"user VALORANT code retains independent inner and outer geometry");
+   using(var raster=new Bitmap(200,200))using(var graphics=Graphics.FromImage(raster)){CrosshairPainter.Draw(graphics,sample,100,100,1);Check(raster.GetPixel(103,99).A==raster.GetPixel(103,101).A&&raster.GetPixel(103,101).A>0,"odd outer line thickness stays centered on the same pixel as inner lines");}
+   Check(new Settings().CrosshairScale==2,"default crosshair display scale is two without modifying imported geometry");
    var custom=CrosshairImport.Parse("0;P;c;8;u;12AB34FF;0l;7;0v;3;0g;1");Check(custom.Red==18&&custom.Green==171&&custom.VerticalLength==3,"VALORANT custom color and unlinked length");
    Reject(()=>CrosshairImport.Parse("0;P;0l;NaN"),"nonfinite values");Reject(()=>CrosshairImport.Parse("0;P;0l"),"truncated VALORANT pair");Reject(()=>CrosshairImport.Parse("0;P;0l;3;0l;4"),"duplicate VALORANT fields");
    long now=(long)(DateTime.UtcNow-new DateTime(1970,1,1,0,0,0,DateTimeKind.Utc)).TotalSeconds;

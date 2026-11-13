@@ -13,15 +13,15 @@ namespace RxToolbox {
   public override string ToString(){return Id=="name"?"服务器名称":Id=="time"?"倒计时":Id=="phase"?"回合阶段":"剩余回合";}
  }
  public sealed class TimerAppearance {
-  public int Width=360,Height=128,Opacity=240,CornerRadius=12;
+  public int Width=360,Height=148,Opacity=240,CornerRadius=12;
   public string FontFamily="Microsoft YaHei UI";
   public int Background=unchecked((int)0xff172033),Foreground=unchecked((int)0xffedf2fa),Accent=unchecked((int)0xff83b4ff);
   public bool PhaseColor=true;
   public TimerPart[] Parts={
-   new TimerPart("name",16,8,328,26,11,false),
-   new TimerPart("time",14,36,186,76,36,true),
-   new TimerPart("phase",214,39,132,28,11,false),
-   new TimerPart("rounds",214,73,132,28,11,false)
+   new TimerPart("name",16,28,328,26,11,false),
+   new TimerPart("time",14,56,186,76,36,true),
+   new TimerPart("phase",214,59,132,28,11,false),
+   new TimerPart("rounds",214,93,132,28,11,false)
   };
   public TimerAppearance Clone(){return Json.Read<TimerAppearance>(Json.Write(this));}
   public void Validate(){

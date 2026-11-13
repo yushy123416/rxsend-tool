@@ -40,7 +40,7 @@ namespace RxToolbox {
    float factor=scale*(p.ReferenceHeight>0?screen.Height/(float)p.ReferenceHeight:1);
    float extent=Math.Max(Math.Abs(p.Gap)+Math.Max(p.Length,p.VerticalLength),p.Outer?p.OuterGap+Math.Max(p.OuterLength,p.OuterVerticalLength):0)+p.Outline+p.Thickness+p.DotSize+4;
    int side=Math.Min(2048,Math.Max(64,(int)(extent*factor*2+8)));side+=(side%2);
-   using(var bitmap=new Bitmap(side,side,PixelFormat.Format32bppPArgb)) {using(var g=Graphics.FromImage(bitmap))CrosshairPainter.Draw(g,p,side/2,side/2,factor);Present(bitmap,screen.Left+screen.Width/2-side/2+offsetX,screen.Top+screen.Height/2-side/2+offsetY);}
+   using(var bitmap=new Bitmap(side,side,PixelFormat.Format32bppPArgb)) {bitmap.SetResolution(96,96);using(var g=Graphics.FromImage(bitmap))CrosshairPainter.Draw(g,p,side/2,side/2,factor);Present(bitmap,screen.Left+screen.Width/2-side/2+offsetX,screen.Top+screen.Height/2-side/2+offsetY);}
   }
  }
  internal sealed class TimerOverlay : LayeredOverlay {
@@ -49,9 +49,9 @@ namespace RxToolbox {
   public void Update(ServerEntry server,string error){
    var appearance=settings.TimerAppearance;var content=TimerContent.From(server,settings.OffsetSeconds);
    string key=content.Name+content.Time+content.Phase+content.Rounds+Json.Write(appearance);if(key==last)return;last=key;
-   using(var bitmap=TimerRenderer.Render(appearance,content)){var p=Location;if(!Screen.AllScreens.AnyIntersect(new Rectangle(p,bitmap.Size)))p=new Point(Screen.PrimaryScreen.WorkingArea.Left+32,Screen.PrimaryScreen.WorkingArea.Top+80);Present(bitmap,p.X,p.Y);}
+   using(var bitmap=TimerRenderer.Render(appearance,content)){using(var g=Graphics.FromImage(bitmap))using(var brush=new SolidBrush(Color.FromArgb(1,0,0,0)))g.FillRectangle(brush,0,0,bitmap.Width,20);var p=Location;if(!Screen.AllScreens.AnyIntersect(new Rectangle(p,bitmap.Size)))p=new Point(Screen.PrimaryScreen.WorkingArea.Left+32,Screen.PrimaryScreen.WorkingArea.Top+80);Present(bitmap,p.X,p.Y);}
   }
-  bool NameHit(Point point){var p=settings.TimerAppearance.Parts[0];return p.Visible&&p.Bounds.Contains(point);}
+  bool NameHit(Point point){var p=settings.TimerAppearance.Parts[0];return p.Visible&&new Rectangle(p.X+p.Width-30,p.Y+p.Height/2-18,36,36).Contains(point);}
   void ShowServers(){
    for(int i=serverMenu.Items.Count-1;i>=0;i--)serverMenu.Items[i].Dispose();serverMenu.Items.Clear();var follow=serverMenu.Items.Add("跟随主界面选择");((ToolStripMenuItem)follow).Checked=string.IsNullOrEmpty(settings.TimerServer);follow.Click+=delegate{SelectServer("");};serverMenu.Items.Add(new ToolStripSeparator());
    foreach(var entry in service.Servers){string key=entry.Key;var item=new ToolStripMenuItem(entry.ShortName){Checked=key==settings.TimerServer};item.Click+=delegate{SelectServer(key);};serverMenu.Items.Add(item);}

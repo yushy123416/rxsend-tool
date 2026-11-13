@@ -13,7 +13,7 @@ namespace RxToolbox {
  public sealed class CrosshairProfile {
   public string Name="薄荷十字", Source="自定义", Code="", Shape="cross";
   public int Red=77,Green=239,Blue=189,Alpha=255,OutlineRed=0,OutlineGreen=0,OutlineBlue=0,OutlineAlpha=200,ReferenceHeight=0;
-  public float Length=7,VerticalLength=7,Thickness=2,Gap=4,Outline=1,DotSize=2,DotAlpha=1,InnerAlpha=1,OuterLength=2,OuterVerticalLength=2,OuterThickness=2,OuterGap=10,OuterAlpha=.35f;
+  public float Length=10,VerticalLength=10,Thickness=2,Gap=4,Outline=1,DotSize=2,DotAlpha=1,InnerAlpha=1,OuterLength=2,OuterVerticalLength=2,OuterThickness=2,OuterGap=10,OuterAlpha=.35f;
   public bool Dot=false,TStyle=false,Inner=true,Outer=false;
   public void Validate() {
    foreach(var v in new[]{Length,VerticalLength,Thickness,Gap,Outline,DotSize,DotAlpha,InnerAlpha,OuterLength,OuterVerticalLength,OuterThickness,OuterGap,OuterAlpha}) if(float.IsNaN(v)||float.IsInfinity(v))throw new InvalidDataException("准星参数无效");
@@ -50,7 +50,7 @@ namespace RxToolbox {
     p.Thickness=b[13]&63;int outline=b[13]>>6;p.Outline=outline==0?0:outline==2?.5f:1;
     p.Gap=(short)(b[14]|b[15]<<8);p.Length=b[16];
    } else if(b[1]==1){
-    p.Source="CSGO / CS2 旧版";p.Gap=Math.Max(0,4+(sbyte)b[2]/10f);p.Length=b[14]/10f;p.Thickness=b[12]/10f;p.ReferenceHeight=480;
+    p.Source="CSGO / CS2 旧版";p.Gap=4+(sbyte)b[2]/10f;p.Length=b[14]/10f;p.Thickness=b[12]/10f;p.ReferenceHeight=480;
     p.Outline=(b[10]&8)!=0?b[3]/2f:0;p.Red=b[4];p.Green=b[5];p.Blue=b[6];p.Alpha=(b[13]&64)!=0?b[7]:255;
     int color=b[10]&7;Color[] palette={Color.Red,Color.Lime,Color.Yellow,Color.Blue,Color.Cyan};if(color<5){p.Red=palette[color].R;p.Green=palette[color].G;p.Blue=palette[color].B;}
     p.Dot=(b[13]&16)!=0;p.TStyle=(b[13]&128)!=0;style=(b[13]&15)>>1;
@@ -103,6 +103,6 @@ namespace RxToolbox {
    }
   }
   static void Lines(Graphics g,Brush fill,Brush border,float x,float y,float len,float vertical,float t,float gap,float o,bool tee){if(len>0){Rect(g,fill,border,x+gap,y-t/2,len,t,o);Rect(g,fill,border,x-gap-len,y-t/2,len,t,o);}if(vertical>0){Rect(g,fill,border,x-t/2,y+gap,t,vertical,o);if(!tee)Rect(g,fill,border,x-t/2,y-gap-vertical,t,vertical,o);}}
-  static void Rect(Graphics g,Brush fill,Brush border,float x,float y,float w,float h,float o){x=(float)Math.Round(x);y=(float)Math.Round(y);w=Math.Max(1,(float)Math.Round(w));h=Math.Max(1,(float)Math.Round(h));if(o>0)g.FillRectangle(border,x-o,y-o,w+o*2,h+o*2);g.FillRectangle(fill,x,y,w,h);}
+  static void Rect(Graphics g,Brush fill,Brush border,float x,float y,float w,float h,float o){x=(float)Math.Floor(x+.5f);y=(float)Math.Floor(y+.5f);w=Math.Max(1,(float)Math.Round(w));h=Math.Max(1,(float)Math.Round(h));if(o>0)g.FillRectangle(border,x-o,y-o,w+o*2,h+o*2);g.FillRectangle(fill,x,y,w,h);}
  }
 }

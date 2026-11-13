@@ -8,8 +8,8 @@ using System.Windows.Forms;
 namespace RxToolbox {
  internal sealed class MainWindow : Form {
   readonly List<IToolModule> modules=new List<IToolModule>();readonly List<FlatButton> nav=new List<FlatButton>();
-  readonly Panel host=new BufferedPanel();readonly Label status;readonly NotifyIcon tray;readonly Timer clock=new Timer();ToolContext context;bool exit,resourcesDisposed;DateTime nextPoll=DateTime.MinValue;
-  internal float UiScale=1;
+  readonly Panel host=new BufferedPanel();readonly Label status;readonly NotifyIcon tray;readonly Timer clock=new Timer();readonly Timer transition=new Timer{Interval=15};Control entering;int animationStep;ToolContext context;bool exit,resourcesDisposed;DateTime nextPoll=DateTime.MinValue;
+  internal float UiScale=1;internal bool AutomaticUpdatesEnabled=true;
   public MainWindow() {
    SuspendLayout();
    Text="RXSend Tool";ClientSize=new Size(1200,820);MinimumSize=new Size(1036,739);StartPosition=FormStartPosition.CenterScreen;BackColor=Ui.Bg;ForeColor=Ui.Text;Font=Ui.Body;AutoScaleMode=AutoScaleMode.None;Icon=Icon.ExtractAssociatedIcon(Application.ExecutablePath)??SystemIcons.Application;DoubleBuffered=true;
@@ -19,23 +19,25 @@ namespace RxToolbox {
    host.Location=new Point(236,24);host.Size=new Size(936,746);host.Anchor=AnchorStyles.Top|AnchorStyles.Bottom|AnchorStyles.Left|AnchorStyles.Right;Controls.Add(host);
    status=Ui.Label(this,"",236,786,936,24,Ui.Small,Ui.Muted);status.Anchor=AnchorStyles.Left|AnchorStyles.Bottom|AnchorStyles.Right;
    context=new ToolContext{Settings=Settings.Load(),Window=this};context.Rounds=new RoundService(context.Settings);context.AutoJoin=new AutoJoinService();context.Crosshair=new CrosshairOverlay();context.Timer=new TimerOverlay(context.Settings,context.Rounds);context.Timer.Moved+=context.Save;context.Timer.SelectionChanged+=context.Save;context.Timer.ConfigureRequested+=EditTimer;
-   modules.Add(new RoundsModule(context));modules.Add(new CrosshairModule(context));modules.Add(new AutoJoinModule(context));modules.Add(new SettingsModule(context));
-   string[] glyphs={"\uE916","\uE81D","\uE768","\uE713"};
+   modules.Add(new RoundsModule(context));modules.Add(new CrosshairModule(context));modules.Add(new AutoJoinModule(context));modules.Add(new NvidiaFiltersModule(context));modules.Add(new SettingsModule(context));
+   string[] glyphs={"\uE916","\uE81D","\uE768","\uE790","\uE713"};
    for(int i=0;i<modules.Count;i++){int index=i;bool bottom=i==modules.Count-1;var b=Ui.Button(side,modules[i].Title,12,bottom?760:188+i*52,184,()=>SelectModule(index));b.Height=44;b.Navigation=true;b.Glyph=glyphs[i];b.BackColor=Ui.Side;if(bottom)b.Anchor=AnchorStyles.Left|AnchorStyles.Bottom;nav.Add(b);modules[i].View.Dock=DockStyle.Fill;modules[i].View.Visible=false;host.Controls.Add(modules[i].View);}
    SelectModule(0);
    var menu=new ContextMenuStrip();menu.Items.Add("打开工具箱",null,delegate{Restore();});menu.Items.Add("显示 / 隐藏准星",null,delegate{ToggleCrosshair();});menu.Items.Add("显示 / 隐藏计时",null,delegate{ToggleTimer();});menu.Items.Add("取消自动进服",null,delegate{context.AutoJoin.Stop();});menu.Items.Add(new ToolStripSeparator());menu.Items.Add("退出",null,delegate{exit=true;Close();});
-   tray=new NotifyIcon{Text="RXSend Tool",Icon=Icon,Visible=true,ContextMenuStrip=menu};tray.DoubleClick+=delegate{Restore();};
+   tray=new NotifyIcon{Text="RXSend Tool",Icon=Icon,Visible=true,ContextMenuStrip=menu};tray.DoubleClick+=delegate{Restore();};context.AutoJoin.Changed+=delegate{if(!context.AutoJoin.Running&&!string.IsNullOrEmpty(context.AutoJoin.Status)&&!context.AutoJoin.Status.StartsWith("已取消")){tray.ShowBalloonTip(4000,"自动进服",context.AutoJoin.Status,ToolTipIcon.Info);}foreach(var module in modules)if(module is AutoJoinModule)module.Tick();};
    clock.Interval=1000;clock.Tick+=delegate{Tick();};clock.Start();
-   Shown+=delegate{int dark=0;try{Native.DwmSetWindowAttribute(Handle,20,ref dark,4);}catch{}bool a=Native.RegisterHotKey(Handle,1,0x4003,(uint)Keys.F8),b=Native.RegisterHotKey(Handle,2,0x4003,(uint)Keys.F9);if(!a||!b)SetStatus("部分快捷键被其他程序占用，请使用托盘菜单");context.UpdateCrosshair();context.Timer.Update(context.Rounds.TimerSelected,context.Rounds.Error);if(context.Settings.TimerVisible)context.Timer.Show();Tick();};
-   Microsoft.Win32.SystemEvents.DisplaySettingsChanged+=DisplayChanged;
-   ResumeLayout(false); using(var dpi=CreateGraphics()) { UiScale=dpi.DpiX/96f; if(UiScale!=1) Scale(new SizeF(UiScale,UiScale)); } ScaleColumns(this,UiScale);
+   Shown+=delegate{int dark=0;try{Native.DwmSetWindowAttribute(Handle,20,ref dark,4);}catch{}bool a=Native.RegisterHotKey(Handle,1,0x4003,(uint)Keys.F8),b=Native.RegisterHotKey(Handle,2,0x4003,(uint)Keys.F9);if(!a||!b)SetStatus("部分快捷键被其他程序占用，请使用托盘菜单");context.UpdateCrosshair();context.Timer.Update(context.Rounds.TimerSelected,context.Rounds.Error);if(context.Settings.TimerVisible)context.Timer.Show();Tick();if(AutomaticUpdatesEnabled)foreach(var module in modules){var settings=module as SettingsModule;if(settings!=null)settings.StartAutoUpdate();}};
+   Microsoft.Win32.SystemEvents.DisplaySettingsChanged+=DisplayChanged;ResizeEnd+=delegate{host.Invalidate(true);};
+   ResumeLayout(false); using(var dpi=CreateGraphics()) { UiScale=dpi.DpiX/96f; if(UiScale!=1) Scale(new SizeF(UiScale,UiScale)); } ScaleColumns(this,UiScale);foreach(var module in modules)FitPage(module.View);
    var work=Screen.FromControl(this).WorkingArea;MinimumSize=new Size(Math.Min(MinimumSize.Width,work.Width),Math.Min(MinimumSize.Height,work.Height));Size=new Size(Math.Min(Width,work.Width),Math.Min(Height,work.Height));
    FormClosing+=delegate(object sender,FormClosingEventArgs e){if(!exit&&e.CloseReason==CloseReason.UserClosing&&context.Settings.CloseToTray){e.Cancel=true;Hide();}else{exit=true;context.Save();}};
   }
-  static void ScaleColumns(Control c,float factor){var list=c as ListView;if(list!=null){foreach(ColumnHeader h in list.Columns)h.Width=(int)(h.Width*factor);if(list.SmallImageList!=null)list.SmallImageList.ImageSize=new Size(1,Math.Max(16,(int)(36*factor)));}var page=c as Panel;if(page!=null&&page.AutoScroll)page.AutoScrollMinSize=new Size((int)(936*factor),(int)(738*factor));foreach(Control child in c.Controls)ScaleColumns(child,factor);}
+  void FitPage(Control page){var viewport=page as ScrollViewport;if(viewport!=null)page=viewport.Content;var sizes=new Dictionary<Control,Rectangle>();Action<Control> collect=null;collect=c=>{foreach(Control child in c.Controls){sizes[child]=child.Bounds;collect(child);}};collect(page);Action fit=delegate{page.SuspendLayout();try{float ratio=Math.Min(1,page.ClientSize.Width/(936f*UiScale));foreach(var pair in sizes){if(pair.Key.IsDisposed)continue;var r=pair.Value;pair.Key.Bounds=new Rectangle((int)(r.X*ratio),r.Y,Math.Max(1,(int)(r.Width*ratio)),r.Height);}}finally{page.ResumeLayout(true);page.Invalidate(true);}};page.SizeChanged+=delegate{fit();};fit();}
+  static void ScaleColumns(Control c,float factor){var list=c as ListView;if(list!=null){foreach(ColumnHeader h in list.Columns)h.Width=(int)(h.Width*factor);if(list.SmallImageList!=null)list.SmallImageList.ImageSize=new Size(1,Math.Max(16,(int)(36*factor)));}var page=c as Panel;if(page!=null&&page.AutoScroll)page.AutoScrollMinSize=new Size(0,(int)(710*factor));foreach(Control child in c.Controls)ScaleColumns(child,factor);}
   void DisplayChanged(object s,EventArgs e){if(IsHandleCreated&&!IsDisposed)BeginInvoke((Action)delegate{context.UpdateCrosshair();});}
   public void SetStatus(string s){status.Text=s;}
-  void SelectModule(int i){status.Text="";host.SuspendLayout();try{for(int k=0;k<modules.Count;k++){if(k!=i)modules[k].View.Hide();nav[k].Selected=k==i;nav[k].Invalidate();}modules[i].View.BringToFront();modules[i].View.Show();}finally{host.ResumeLayout(true);}modules[i].Tick();host.Refresh();modules[i].View.Refresh();}
+  void SelectModule(int i){if(entering==modules[i].View)return;status.Text="";host.SuspendLayout();try{for(int k=0;k<modules.Count;k++){if(k!=i)modules[k].View.Hide();nav[k].Selected=k==i;nav[k].Invalidate();}modules[i].View.BringToFront();modules[i].View.Show();}finally{host.ResumeLayout(true);}entering=modules[i].View;animationStep=0;transition.Stop();transition.Tick-=Animate;transition.Tick+=Animate;entering.Dock=DockStyle.None;entering.Bounds=new Rectangle(18,0,host.Width,host.Height);transition.Start();modules[i].Tick();host.Refresh();modules[i].View.Refresh();}
+  void Animate(object sender,EventArgs e){animationStep++;entering.Left=(int)(18*Math.Pow(1-Math.Min(1,animationStep/10f),3));if(animationStep>=10){transition.Stop();entering.Dock=DockStyle.Fill;}}
   void Tick(){context.AutoJoin.Tick();foreach(var m in modules)m.Tick();if(context.Settings.TimerVisible)context.Timer.Update(context.Rounds.TimerSelected,context.Rounds.Error);if(DateTime.UtcNow>=nextPoll){nextPoll=DateTime.UtcNow.AddSeconds(Visible||context.Settings.TimerVisible?10:30);context.Rounds.Refresh(false);}}
   public void ToggleCrosshair(){context.Settings.CrosshairVisible=!context.Settings.CrosshairVisible;context.UpdateCrosshair();context.Save();foreach(var m in modules)m.Tick();}
   public void ToggleTimer(){context.Settings.TimerVisible=!context.Settings.TimerVisible;context.Timer.Update(context.Rounds.TimerSelected,context.Rounds.Error);if(context.Settings.TimerVisible)context.Timer.Show();else context.Timer.Hide();context.Save();foreach(var m in modules)m.Tick();}
@@ -45,7 +47,7 @@ namespace RxToolbox {
   protected override void WndProc(ref Message m){if(m.Msg==0x312){if(m.WParam.ToInt32()==1)ToggleCrosshair();if(m.WParam.ToInt32()==2)ToggleTimer();}base.WndProc(ref m);}
   protected override void Dispose(bool disposing){
    if(disposing&&!resourcesDisposed){
-    resourcesDisposed=true;Microsoft.Win32.SystemEvents.DisplaySettingsChanged-=DisplayChanged;clock.Stop();clock.Dispose();
+    resourcesDisposed=true;Microsoft.Win32.SystemEvents.DisplaySettingsChanged-=DisplayChanged;clock.Stop();clock.Dispose();transition.Dispose();
     if(tray!=null){var menu=tray.ContextMenuStrip;tray.ContextMenuStrip=null;tray.Visible=false;if(menu!=null)menu.Dispose();tray.Dispose();}
     if(context!=null){if(IsHandleCreated){Native.UnregisterHotKey(Handle,1);Native.UnregisterHotKey(Handle,2);}foreach(var module in modules)module.Dispose();context.AutoJoin.Dispose();context.Rounds.Dispose();context.Crosshair.Dispose();context.Timer.Dispose();}
    }
@@ -53,11 +55,11 @@ namespace RxToolbox {
   }
  }
  internal abstract class ToolModule : IToolModule {
-  protected readonly ToolContext C;protected readonly Panel Page=new BufferedPanel{BackColor=Ui.Bg,AutoScroll=true,AutoScrollMinSize=new Size(936,738)};
-  public abstract string Title{get;}public abstract string Symbol{get;}public Control View{get{return Page;}}
-  protected ToolModule(ToolContext c){C=c;}
+  protected readonly ToolContext C;protected readonly Panel Page=new BufferedPanel{BackColor=Ui.Bg,AutoScroll=false};
+  public abstract string Title{get;}public abstract string Symbol{get;}readonly ScrollViewport viewport;public Control View{get{return viewport;}}
+  protected ToolModule(ToolContext c){C=c;viewport=new ScrollViewport(Page);}
   protected void Header(string title,string subtitle){Ui.Label(Page,title,0,12,700,58,Ui.Title);}
-  public virtual void Tick(){}public virtual void Dispose(){Page.Dispose();}
+  public virtual void Tick(){}public virtual void Dispose(){viewport.Dispose();}
  }
  internal sealed class RoundsModule : ToolModule {
   public override string Title{get{return "回合计时";}}public override string Symbol{get{return "◷";}}
@@ -77,6 +79,7 @@ namespace RxToolbox {
    list=new ServerListView{Location=new Point(1,5),Size=new Size(934,254),View=System.Windows.Forms.View.Details,FullRowSelect=true,HideSelection=false,MultiSelect=false,BorderStyle=BorderStyle.None,BackColor=Ui.Card,ForeColor=Ui.Text,Font=Ui.Body,HeaderStyle=ColumnHeaderStyle.Nonclickable,OwnerDraw=true,AccessibleName="服务器状态列表"};
    rowHeight=new ImageList{ImageSize=new Size(1,36),ColorDepth=ColorDepth.Depth32Bit};list.SmallImageList=rowHeight;
    list.Columns.Add("服务器",168);list.Columns.Add("阶段",126);list.Columns.Add("剩余回合",98);list.Columns.Add("倒计时",104);list.Columns.Add("人数",88);list.Columns.Add("延迟",96);list.Columns.Add("地图",230);
+   list.SizeChanged+=delegate{int[] weights={168,126,98,104,88,96,230};int available=Math.Max(100,list.ClientSize.Width-SystemInformation.VerticalScrollBarWidth-4);for(int col=0;col<weights.Length;col++)list.Columns[col].Width=available*weights[col]/910;};
    list.DrawColumnHeader+=delegate(object sender,DrawListViewColumnHeaderEventArgs e){using(var b=new SolidBrush(Ui.Card))e.Graphics.FillRectangle(b,e.Bounds);TextRenderer.DrawText(e.Graphics,e.Header.Text,Ui.Small,new Rectangle(e.Bounds.X+14,e.Bounds.Y,e.Bounds.Width-18,e.Bounds.Height),Ui.Muted,TextFormatFlags.VerticalCenter|Ui.PaintFlags);using(var pen=new Pen(Ui.Border))e.Graphics.DrawLine(pen,e.Bounds.Left,e.Bounds.Bottom-1,e.Bounds.Right,e.Bounds.Bottom-1);};
    list.DrawItem+=delegate(object sender,DrawListViewItemEventArgs e){};
    list.DrawSubItem+=delegate(object sender,DrawListViewSubItemEventArgs e){
@@ -102,7 +105,7 @@ namespace RxToolbox {
  }
  internal sealed class CrosshairModule : ToolModule {
   public override string Title{get{return "屏幕准星";}}public override string Symbol{get{return "⊕";}}
-  readonly Preview preview;readonly FlatButton toggle;readonly TextBox code;readonly Label source;readonly Panel editor;readonly SelectField presets;bool editing;
+  readonly Preview preview;readonly FlatButton toggle;readonly TextBox code;readonly Label source;readonly Panel editor;readonly SelectField presets;NumberField scaleField;bool editing;
   public CrosshairModule(ToolContext c):base(c){
    Header("屏幕准星","你的准星，你的手感。");
    preview=new Preview{Location=new Point(0,124),Size=new Size(320,288),Profile=C.Settings.Crosshair,PreviewScale=C.Settings.CrosshairScale};Page.Controls.Add(preview);
@@ -110,7 +113,7 @@ namespace RxToolbox {
    source=Ui.Label(Page,"",0,471,320,24,Ui.Small,Ui.Muted);
    var display=new CardPanel{Location=new Point(0,508),Size=new Size(320,194)};Page.Controls.Add(display);
    Ui.Label(display,"显示器",20,20,80);var screen=Ui.Combo(display,106,22,192);foreach(var d in Screen.AllScreens)screen.Items.Add(d.DeviceName+(d.Primary?" · 主显示器":""));int selected=Array.FindIndex(Screen.AllScreens,s=>s.DeviceName==C.Settings.ScreenDevice);screen.SelectedIndex=selected<0?0:selected;screen.SelectedIndexChanged+=delegate{var screens=Screen.AllScreens;if(screen.SelectedIndex>=0&&screen.SelectedIndex<screens.Length){C.Settings.ScreenDevice=screens[screen.SelectedIndex].DeviceName;Apply();}};
-   Ui.Label(display,"缩放",20,66,75);Ui.Numeric(display,106,68,(decimal)C.Settings.CrosshairScale,.25m,4,v=>{C.Settings.CrosshairScale=(float)v;Apply();},.05m);
+   Ui.Label(display,"缩放",20,66,75);scaleField=Ui.Numeric(display,106,68,(decimal)C.Settings.CrosshairScale,.25m,4,v=>{C.Settings.CrosshairScale=(float)v;Apply();},.05m);
    Ui.Label(display,"偏移 X / Y",20,111,84);Ui.Numeric(display,106,114,C.Settings.CrosshairX,-2000,2000,v=>{C.Settings.CrosshairX=(int)v;Apply();}).Width=88;Ui.Numeric(display,210,114,C.Settings.CrosshairY,-2000,2000,v=>{C.Settings.CrosshairY=(int)v;Apply();}).Width=88;
    Ui.Label(display,"相对于显示器中心 · 单位：像素",20,153,280,24,Ui.Small,Ui.Muted);
    var card=new CardPanel{Location=new Point(344,124),Size=new Size(592,152)};Page.Controls.Add(card);Ui.Label(card,"导入准星",20,14,300,28,Ui.Heading);
@@ -131,7 +134,7 @@ namespace RxToolbox {
    Ui.Label(editor,"透明度",332,193,100);Ui.Numeric(editor,448,195,p.Alpha,0,255,v=>{p.Alpha=(int)v;Apply();});if(C.Window.UiScale!=1)foreach(Control child in editor.Controls)child.Scale(new SizeF(C.Window.UiScale,C.Window.UiScale));editing=false;
   }
   void Apply(){if(editing)return;C.Settings.Crosshair.Validate();preview.Profile=C.Settings.Crosshair;preview.PreviewScale=C.Settings.CrosshairScale;preview.Invalidate();C.UpdateCrosshair();C.Save();Tick();}
-  void Import(){try{var p=CrosshairImport.Parse(code.Text);C.Settings.Crosshair=p;BuildEditor();Apply();C.Window.SetStatus("已导入 "+p.Source+" 静态准星");}catch(Exception ex){C.Window.SetStatus(ex.Message);}}
+  void Import(){try{var p=CrosshairImport.Parse(code.Text);C.Settings.Crosshair=p;C.Settings.CrosshairScale=2;scaleField.Value=2;C.Settings.CrosshairX=0;C.Settings.CrosshairY=0;BuildEditor();Apply();C.Window.SetStatus("已导入 "+p.Source+" 静态准星");}catch(Exception ex){C.Window.SetStatus(ex.Message);}}
   void ChooseColor(){var p=C.Settings.Crosshair;using(var d=new ColorDialog{Color=Color.FromArgb(p.Red,p.Green,p.Blue),FullOpen=true})if(d.ShowDialog(C.Window)==DialogResult.OK){p.Red=d.Color.R;p.Green=d.Color.G;p.Blue=d.Color.B;Apply();}}
   void FillPresets(){presets.Items.Clear();foreach(var p in C.Settings.Presets)presets.Items.Add(p);if(presets.Items.Count>0)presets.SelectedIndex=presets.Items.Count-1;}
   void SavePreset(){if(C.Settings.Presets.Count>=100){C.Window.SetStatus("最多保存 100 个预设");return;}string name=Prompt.Ask(C.Window,"保存准星",C.Settings.Crosshair.Name);if(string.IsNullOrWhiteSpace(name))return;C.Settings.Presets.Add(new CrosshairPreset{Name=name.Trim(),Profile=C.Settings.Crosshair.Clone()});C.Save();FillPresets();}

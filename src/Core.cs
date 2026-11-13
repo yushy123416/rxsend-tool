@@ -20,6 +20,7 @@ namespace RxToolbox {
  internal static class Program {
   [STAThread] public static void Main(string[] args) {
    if (args.Length > 0 && args[0] == "--apply-update") { Updates.Apply(args); return; }
+   if (args.Length > 0 && args[0] == "--nvidia-filters") { try { NvidiaFilters.RunHelper(args); } catch(Exception e) { Log.Write(e); Environment.ExitCode=1; } return; }
    bool first;
    using (var mutex = new Mutex(true, "Local\\RxToolbox.v1", out first)) {
     if (!first) { MessageBox.Show("RX Toolbox 已在系统托盘运行。", "RX Toolbox"); return; }
@@ -40,12 +41,13 @@ namespace RxToolbox {
   public string TimerServer="";
   public bool TimerVisible=false, CrosshairVisible=false, CloseToTray=true, AutoCheck=false;
   public int TimerX=32, TimerY=80, OffsetSeconds=0, CrosshairX=0, CrosshairY=0;
-  public float CrosshairScale=1;
+  public float CrosshairScale=2;
+  public int CrosshairDisplayVersion=1;
   public TimerAppearance TimerAppearance=new TimerAppearance();
   public CrosshairProfile Crosshair=new CrosshairProfile();
   public List<CrosshairPreset> Presets=new List<CrosshairPreset>();
   public static Settings Load() {
-   try { var s=Json.Read<Settings>(File.ReadAllText(Path.Combine(Folder,"settings.json"))); if(s==null) return new Settings(); s.Crosshair=s.Crosshair??new CrosshairProfile(); s.Crosshair.Validate(); s.CrosshairScale=Math.Max(.25f,Math.Min(4,s.CrosshairScale)); s.OffsetSeconds=Math.Max(-300,Math.Min(300,s.OffsetSeconds)); s.Presets=s.Presets??new List<CrosshairPreset>();s.TimerAppearance=s.TimerAppearance??new TimerAppearance();s.TimerAppearance.Validate();Updates.UseDefaultSource(s); return s; }
+   try { var s=Json.Read<Settings>(File.ReadAllText(Path.Combine(Folder,"settings.json"))); if(s==null) return new Settings(); s.Crosshair=s.Crosshair??new CrosshairProfile(); s.Crosshair.Validate(); if(s.CrosshairDisplayVersion<2){if(s.CrosshairScale==1)s.CrosshairScale=2;s.CrosshairDisplayVersion=2;} s.CrosshairScale=Math.Max(.25f,Math.Min(4,s.CrosshairScale)); s.OffsetSeconds=Math.Max(-300,Math.Min(300,s.OffsetSeconds)); s.Presets=s.Presets??new List<CrosshairPreset>();s.TimerAppearance=s.TimerAppearance??new TimerAppearance();s.TimerAppearance.Validate();Updates.UseDefaultSource(s); return s; }
    catch(Exception e) { if(!(e is FileNotFoundException)&&!(e is DirectoryNotFoundException)) Log.Write(e); return new Settings(); }
   }
   public void Save() {

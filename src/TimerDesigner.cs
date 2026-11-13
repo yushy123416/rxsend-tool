@@ -9,19 +9,21 @@ using System.Windows.Forms;
 namespace RxToolbox {
  internal sealed class TimerCanvas : Control {
   public TimerAppearance Appearance;public TimerContent Content=TimerContent.Sample;public int Selected;public event Action SelectionChanged,LayoutChanged;
-  float zoom=1;PointF origin;Point dragStart;Rectangle original;bool dragging,resizing;
+  float zoom=1;PointF origin;Point dragStart;Rectangle original;bool dragging,resizing,resizeCanvas;int originalWidth,originalHeight;float dragZoom;
   public TimerCanvas(){SetStyle(ControlStyles.UserPaint|ControlStyles.AllPaintingInWmPaint|ControlStyles.OptimizedDoubleBuffer|ControlStyles.ResizeRedraw|ControlStyles.Selectable,true);BackColor=Ui.Side;TabStop=true;AccessibleName="悬浮计时布局画布";}
   void Transform(){zoom=Math.Max(.1f,Math.Min(2f,Math.Min((Width-48f)/Appearance.Width,(Height-48f)/Appearance.Height)));origin=new PointF((Width-Appearance.Width*zoom)/2,(Height-Appearance.Height*zoom)/2);}
   RectangleF Display(Rectangle r){return new RectangleF(origin.X+r.X*zoom,origin.Y+r.Y*zoom,r.Width*zoom,r.Height*zoom);}
   protected override void OnPaint(PaintEventArgs e){base.OnPaint(e);var g=e.Graphics;g.Clear(Ui.Side);using(var brush=new SolidBrush(Color.FromArgb(225,231,241)))for(int y=0;y<Height;y+=20)for(int x=0;x<Width;x+=20)if((x/20+y/20)%2==0)g.FillRectangle(brush,x,y,20,20);if(Appearance==null)return;Transform();
    using(var bitmap=TimerRenderer.Render(Appearance,Content)){g.InterpolationMode=InterpolationMode.HighQualityBicubic;g.DrawImage(bitmap,Rectangle.Round(Display(new Rectangle(0,0,Appearance.Width,Appearance.Height))),0,0,bitmap.Width,bitmap.Height,GraphicsUnit.Pixel);}
+   var frame=Display(new Rectangle(0,0,Appearance.Width,Appearance.Height));using(var pen=new Pen(Ui.Accent,2))g.DrawRectangle(pen,frame.X,frame.Y,frame.Width,frame.Height);using(var brush=new SolidBrush(Ui.Accent))g.FillRectangle(brush,frame.Right-6,frame.Bottom-6,12,12);
    for(int i=0;i<Appearance.Parts.Length;i++){var part=Appearance.Parts[i];if(!part.Visible)continue;var r=Display(part.Bounds);using(var pen=new Pen(i==Selected?Ui.Accent:Color.FromArgb(110,167,190,225),i==Selected?2:1)){pen.DashStyle=i==Selected?DashStyle.Solid:DashStyle.Dot;g.DrawRectangle(pen,r.X,r.Y,r.Width,r.Height);}if(i==Selected)using(var brush=new SolidBrush(Ui.Accent))g.FillRectangle(brush,r.Right-5,r.Bottom-5,10,10);}
   }
   protected override void OnMouseDown(MouseEventArgs e){base.OnMouseDown(e);if(e.Button!=MouseButtons.Left||Appearance==null)return;Focus();Transform();
+   var frame=Display(new Rectangle(0,0,Appearance.Width,Appearance.Height));resizeCanvas=new RectangleF(frame.Right-10,frame.Bottom-10,20,20).Contains(e.Location);if(resizeCanvas){originalWidth=Appearance.Width;originalHeight=Appearance.Height;dragZoom=zoom;dragStart=e.Location;dragging=true;Capture=true;return;}
    var current=Display(Appearance.Parts[Selected].Bounds);if(Appearance.Parts[Selected].Visible&&new RectangleF(current.Right-9,current.Bottom-9,18,18).Contains(e.Location)){resizing=true;}else{resizing=false;int hit=-1;for(int i=Appearance.Parts.Length-1;i>=0;i--)if(Appearance.Parts[i].Visible&&Display(Appearance.Parts[i].Bounds).Contains(e.Location)){hit=i;break;}if(hit<0)return;Selected=hit;}
    original=Appearance.Parts[Selected].Bounds;dragStart=e.Location;dragging=true;Capture=true;Invalidate();if(SelectionChanged!=null)SelectionChanged();
   }
-  protected override void OnMouseMove(MouseEventArgs e){base.OnMouseMove(e);if(!dragging)return;var p=Appearance.Parts[Selected];int dx=(int)Math.Round((e.X-dragStart.X)/zoom),dy=(int)Math.Round((e.Y-dragStart.Y)/zoom);
+  protected override void OnMouseMove(MouseEventArgs e){base.OnMouseMove(e);if(!dragging)return;if(resizeCanvas){Appearance.Width=Math.Max(240,Math.Min(1000,originalWidth+(int)((e.X-dragStart.X)/dragZoom)));Appearance.Height=Math.Max(96,Math.Min(600,originalHeight+(int)((e.Y-dragStart.Y)/dragZoom)));Appearance.Validate();Invalidate();if(LayoutChanged!=null)LayoutChanged();return;}var p=Appearance.Parts[Selected];int dx=(int)Math.Round((e.X-dragStart.X)/zoom),dy=(int)Math.Round((e.Y-dragStart.Y)/zoom);
    if(resizing){p.Width=Math.Max(24,Math.Min(Appearance.Width-p.X,original.Width+dx));p.Height=Math.Max(20,Math.Min(Appearance.Height-p.Y,original.Height+dy));}else{p.X=Math.Max(0,Math.Min(Appearance.Width-p.Width,original.X+dx));p.Y=Math.Max(0,Math.Min(Appearance.Height-p.Height,original.Y+dy));}Invalidate();if(LayoutChanged!=null)LayoutChanged();
   }
   protected override void OnMouseUp(MouseEventArgs e){base.OnMouseUp(e);dragging=false;Capture=false;}
@@ -54,7 +56,7 @@ namespace RxToolbox {
   }
   void ChangePart(Action<TimerPart> change){if(syncing)return;change(Appearance.Parts[canvas.Selected]);ValidateLayout();}
   void ValidateLayout(){Appearance.Validate();SyncPart();RefreshCanvas();}
-  void SyncPart(){if(fontSize==null)return;syncing=true;var p=Appearance.Parts[canvas.Selected];fontSize.Value=(decimal)p.FontSize;x.Value=p.X;y.Value=p.Y;w.Value=p.Width;h.Value=p.Height;visible.Checked=p.Visible;bold.Checked=p.Bold;syncing=false;}
+  void SyncPart(){if(fontSize==null)return;syncing=true;if(width!=null){width.Value=Appearance.Width;height.Value=Appearance.Height;}var p=Appearance.Parts[canvas.Selected];fontSize.Value=(decimal)p.FontSize;x.Value=p.X;y.Value=p.Y;w.Value=p.Width;h.Value=p.Height;visible.Checked=p.Visible;bold.Checked=p.Bold;syncing=false;}
   void RefreshCanvas(){if(!syncing)canvas.Invalidate();}
   void ChooseColor(int target){using(var picker=new ColorDialog{FullOpen=true,Color=Color.FromArgb(target==0?Appearance.Background:target==1?Appearance.Foreground:Appearance.Accent)})if(picker.ShowDialog(this)==DialogResult.OK){if(target==0)Appearance.Background=picker.Color.ToArgb();else if(target==1)Appearance.Foreground=picker.Color.ToArgb();else Appearance.Accent=picker.Color.ToArgb();RefreshCanvas();}}
   void Reset(){Appearance=new TimerAppearance();canvas.Appearance=Appearance;canvas.Selected=0;syncing=true;parts.Items.Clear();foreach(var p in Appearance.Parts)parts.Items.Add(p);parts.SelectedIndex=0;fonts.SelectedIndex=fonts.Items.IndexOf(Appearance.FontFamily);opacity.Value=Appearance.Opacity*100m/255m;width.Value=Appearance.Width;height.Value=Appearance.Height;radius.Value=Appearance.CornerRadius;phaseColor.Checked=Appearance.PhaseColor;syncing=false;SyncPart();canvas.Invalidate();}

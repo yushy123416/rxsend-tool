@@ -1,4 +1,5 @@
 using System;
+using System.Runtime.InteropServices;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Windows.Forms;
@@ -50,6 +51,8 @@ namespace RxToolbox {
   }
  }
  internal sealed class BufferedPanel : Panel {
+  [DllImport("uxtheme.dll",CharSet=CharSet.Unicode)]static extern int SetWindowTheme(IntPtr window,string app,string id);
+  protected override void OnHandleCreated(EventArgs e){base.OnHandleCreated(e);SetWindowTheme(Handle,"Explorer",null);}
   public BufferedPanel(){DoubleBuffered=true;SetStyle(ControlStyles.ResizeRedraw,true);}
  }
  internal sealed class ServerListView : ListView {
@@ -57,7 +60,8 @@ namespace RxToolbox {
   protected override void OnHandleCreated(EventArgs e){base.OnHandleCreated(e);Native.SendMessage(Handle,0x1036,(IntPtr)0x10000,(IntPtr)0x10000);}
  }
  internal class CardPanel : Panel {
-  public CardPanel(){DoubleBuffered=true;BackColor=Ui.Card;Padding=new Padding(1);}
+  public CardPanel(){DoubleBuffered=true;SetStyle(ControlStyles.ResizeRedraw,true);BackColor=Ui.Card;Padding=new Padding(1);}
+  protected override void OnSizeChanged(EventArgs e){base.OnSizeChanged(e);Invalidate(true);}
   protected override void OnPaintBackground(PaintEventArgs e){e.Graphics.Clear(Parent==null?Ui.Bg:Parent.BackColor);e.Graphics.SmoothingMode=SmoothingMode.AntiAlias;float s=DeviceDpi/96f;using(var p=Ui.Round(new RectangleF(0,0,Width-1,Height-1),8*s))using(var b=new SolidBrush(Ui.Card))using(var pen=new Pen(Ui.Border)){e.Graphics.FillPath(b,p);e.Graphics.DrawPath(pen,p);}}
  }
  internal sealed class Preview : CardPanel {
