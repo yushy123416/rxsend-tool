@@ -20,6 +20,7 @@ if($UsePrepared){
     if($preparedHash -ine $manifest.sha256){throw 'Prepared update SHA-256 differs'}
     $identity=[Reflection.AssemblyName]::GetAssemblyName($preparedExe)
     if($identity.Name -ne 'RxToolbox' -or $identity.Version.ToString(3) -ne $version){throw 'Prepared update identity differs'}
+    & "$PSScriptRoot/tests/VerifyEndpointPrivacy.ps1" -ArtifactPath $preparedExe
     Copy-Item -LiteralPath $preparedExe -Destination $exe -Force
     Copy-Item -LiteralPath $preparedManifest -Destination (Join-Path $PSScriptRoot 'dist\update.json') -Force
     Compress-Archive -Path $exe,(Join-Path $PSScriptRoot 'dist\LICENSE'),(Join-Path $PSScriptRoot 'dist\THIRD-PARTY-NOTICES.md') -DestinationPath (Join-Path $PSScriptRoot "dist\RxToolbox-$version-Windows.zip") -Force
@@ -27,6 +28,7 @@ if($UsePrepared){
     return
 }
 $githubUrl="https://github.com/$Repository/releases/download/v$version/RXSendTool.exe"
+& "$PSScriptRoot/tests/VerifyEndpointPrivacy.ps1" -ArtifactPath $exe
 $manifest=[ordered]@{
     version=$version
     url="https://gitee.com/$GiteeRepository/raw/main/updates/v$version/RXSendTool.exe"

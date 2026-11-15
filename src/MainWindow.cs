@@ -9,7 +9,8 @@ namespace RxToolbox {
  internal sealed class MainWindow : Form {
   readonly List<IToolModule> modules=new List<IToolModule>();readonly List<FlatButton> nav=new List<FlatButton>();
   readonly Panel host=new BufferedPanel();readonly Label status;readonly NotifyIcon tray;readonly Timer clock=new Timer();readonly Timer transition=new Timer{Interval=15};Control entering;int animationStep;ToolContext context;bool exit,resourcesDisposed;DateTime nextPoll=DateTime.MinValue;
-  internal float UiScale=1;internal bool AutomaticUpdatesEnabled=true;
+  readonly ToastNotification toast=new ToastNotification();
+  internal float UiScale=1;internal bool AutomaticUpdatesEnabled=true,AutomaticTemplateUpdatesEnabled=true,AutomaticServerQueriesEnabled=true;
   public MainWindow() {
    SuspendLayout();
    Text="RXSend Tool";ClientSize=new Size(1200,820);MinimumSize=new Size(1036,739);StartPosition=FormStartPosition.CenterScreen;BackColor=Ui.Bg;ForeColor=Ui.Text;Font=Ui.Body;AutoScaleMode=AutoScaleMode.None;Icon=Icon.ExtractAssociatedIcon(Application.ExecutablePath)??SystemIcons.Application;DoubleBuffered=true;
@@ -18,9 +19,10 @@ namespace RxToolbox {
    Ui.Label(side,"v"+Updates.Current.ToString(3),26,80,170,24,Ui.Small,Ui.Muted);
    host.Location=new Point(236,24);host.Size=new Size(936,746);host.Anchor=AnchorStyles.Top|AnchorStyles.Bottom|AnchorStyles.Left|AnchorStyles.Right;Controls.Add(host);
    status=Ui.Label(this,"",236,786,936,24,Ui.Small,Ui.Muted);status.Anchor=AnchorStyles.Left|AnchorStyles.Bottom|AnchorStyles.Right;
+   Controls.Add(toast);toast.BringToFront();host.SizeChanged+=delegate{toast.Position(host.Bounds,UiScale);};host.LocationChanged+=delegate{toast.Position(host.Bounds,UiScale);};
    context=new ToolContext{Settings=Settings.Load(),Window=this};context.Rounds=new RoundService(context.Settings);context.AutoJoin=new AutoJoinService();context.Crosshair=new CrosshairOverlay();context.Timer=new TimerOverlay(context.Settings,context.Rounds);context.Timer.Moved+=context.Save;context.Timer.SelectionChanged+=context.Save;context.Timer.ConfigureRequested+=EditTimer;
-   modules.Add(new RoundsModule(context));modules.Add(new CrosshairModule(context));modules.Add(new AutoJoinModule(context));modules.Add(new NvidiaFiltersModule(context));modules.Add(new SettingsModule(context));
-   string[] glyphs={"\uE916","\uE81D","\uE768","\uE790","\uE713"};
+   modules.Add(new RoundsModule(context));modules.Add(new ServerDetailsModule(context));modules.Add(new CrosshairModule(context));modules.Add(new AutoJoinModule(context));modules.Add(new NvidiaFiltersModule(context));modules.Add(new BroadcastModule(context));modules.Add(new SettingsModule(context));
+   string[] glyphs={"\uE916","\uE946","\uE81D","\uE768","\uE790","\uE789","\uE713"};
    for(int i=0;i<modules.Count;i++){int index=i;bool bottom=i==modules.Count-1;var b=Ui.Button(side,modules[i].Title,12,bottom?760:188+i*52,184,()=>SelectModule(index));b.Height=44;b.Navigation=true;b.Glyph=glyphs[i];b.BackColor=Ui.Side;if(bottom)b.Anchor=AnchorStyles.Left|AnchorStyles.Bottom;nav.Add(b);modules[i].View.Dock=DockStyle.Fill;modules[i].View.Visible=false;host.Controls.Add(modules[i].View);}
    SelectModule(0);
    var menu=new ContextMenuStrip();menu.Items.Add("打开工具箱",null,delegate{Restore();});menu.Items.Add("显示 / 隐藏准星",null,delegate{ToggleCrosshair();});menu.Items.Add("显示 / 隐藏计时",null,delegate{ToggleTimer();});menu.Items.Add("取消自动进服",null,delegate{context.AutoJoin.Stop();});menu.Items.Add(new ToolStripSeparator());menu.Items.Add("退出",null,delegate{exit=true;Close();});
@@ -28,14 +30,15 @@ namespace RxToolbox {
    clock.Interval=1000;clock.Tick+=delegate{Tick();};clock.Start();
    Shown+=delegate{int dark=0;try{Native.DwmSetWindowAttribute(Handle,20,ref dark,4);}catch{}bool a=Native.RegisterHotKey(Handle,1,0x4003,(uint)Keys.F8),b=Native.RegisterHotKey(Handle,2,0x4003,(uint)Keys.F9);if(!a||!b)SetStatus("部分快捷键被其他程序占用，请使用托盘菜单");context.UpdateCrosshair();context.Timer.Update(context.Rounds.TimerSelected,context.Rounds.Error);if(context.Settings.TimerVisible)context.Timer.Show();Tick();if(AutomaticUpdatesEnabled)foreach(var module in modules){var settings=module as SettingsModule;if(settings!=null)settings.StartAutoUpdate();}};
    Microsoft.Win32.SystemEvents.DisplaySettingsChanged+=DisplayChanged;ResizeEnd+=delegate{host.Invalidate(true);};
-   ResumeLayout(false); using(var dpi=CreateGraphics()) { UiScale=dpi.DpiX/96f; if(UiScale!=1) Scale(new SizeF(UiScale,UiScale)); } ScaleColumns(this,UiScale);foreach(var module in modules)FitPage(module.View);
+   ResumeLayout(false); using(var dpi=CreateGraphics()) { UiScale=dpi.DpiX/96f; if(UiScale!=1) Scale(new SizeF(UiScale,UiScale)); } ScaleColumns(this,UiScale);foreach(var module in modules)if(!(module is BroadcastModule))FitPage(module.View);
    var work=Screen.FromControl(this).WorkingArea;MinimumSize=new Size(Math.Min(MinimumSize.Width,work.Width),Math.Min(MinimumSize.Height,work.Height));Size=new Size(Math.Min(Width,work.Width),Math.Min(Height,work.Height));
    FormClosing+=delegate(object sender,FormClosingEventArgs e){if(!exit&&e.CloseReason==CloseReason.UserClosing&&context.Settings.CloseToTray){e.Cancel=true;Hide();}else{exit=true;context.Save();}};
   }
   void FitPage(Control page){var viewport=page as ScrollViewport;if(viewport!=null)page=viewport.Content;var sizes=new Dictionary<Control,Rectangle>();Action<Control> collect=null;collect=c=>{foreach(Control child in c.Controls){sizes[child]=child.Bounds;collect(child);}};collect(page);Action fit=delegate{page.SuspendLayout();try{float ratio=Math.Min(1,page.ClientSize.Width/(936f*UiScale));foreach(var pair in sizes){if(pair.Key.IsDisposed)continue;var r=pair.Value;pair.Key.Bounds=new Rectangle((int)(r.X*ratio),r.Y,Math.Max(1,(int)(r.Width*ratio)),r.Height);}}finally{page.ResumeLayout(true);page.Invalidate(true);}};page.SizeChanged+=delegate{fit();};fit();}
   static void ScaleColumns(Control c,float factor){var list=c as ListView;if(list!=null){foreach(ColumnHeader h in list.Columns)h.Width=(int)(h.Width*factor);if(list.SmallImageList!=null)list.SmallImageList.ImageSize=new Size(1,Math.Max(16,(int)(36*factor)));}var page=c as Panel;if(page!=null&&page.AutoScroll)page.AutoScrollMinSize=new Size(0,(int)(710*factor));foreach(Control child in c.Controls)ScaleColumns(child,factor);}
   void DisplayChanged(object s,EventArgs e){if(IsHandleCreated&&!IsDisposed)BeginInvoke((Action)delegate{context.UpdateCrosshair();});}
-  public void SetStatus(string s){status.Text=s;}
+  public void SetStatus(string s){status.Text=Privacy.Redact(s);}
+  internal void ShowToast(string message,Color color){toast.ShowMessage(message,color,host.Bounds,UiScale);}
   void SelectModule(int i){if(entering==modules[i].View)return;status.Text="";host.SuspendLayout();try{for(int k=0;k<modules.Count;k++){if(k!=i)modules[k].View.Hide();nav[k].Selected=k==i;nav[k].Invalidate();}modules[i].View.BringToFront();modules[i].View.Show();}finally{host.ResumeLayout(true);}entering=modules[i].View;animationStep=0;transition.Stop();transition.Tick-=Animate;transition.Tick+=Animate;entering.Dock=DockStyle.None;entering.Bounds=new Rectangle(18,0,host.Width,host.Height);transition.Start();modules[i].Tick();host.Refresh();modules[i].View.Refresh();}
   void Animate(object sender,EventArgs e){animationStep++;entering.Left=(int)(18*Math.Pow(1-Math.Min(1,animationStep/10f),3));if(animationStep>=10){transition.Stop();entering.Dock=DockStyle.Fill;}}
   void Tick(){context.AutoJoin.Tick();foreach(var m in modules)m.Tick();if(context.Settings.TimerVisible)context.Timer.Update(context.Rounds.TimerSelected,context.Rounds.Error);if(DateTime.UtcNow>=nextPoll){nextPoll=DateTime.UtcNow.AddSeconds(Visible||context.Settings.TimerVisible?10:30);context.Rounds.Refresh(false);}}
@@ -44,7 +47,7 @@ namespace RxToolbox {
   public void Restore(){Show();WindowState=FormWindowState.Normal;Activate();}
   public void ExitForUpdate(){exit=true;Close();}
   public void EditTimer(){using(var editor=new TimerDesigner(context.Settings.TimerAppearance)){if(editor.ShowDialog(this)!=DialogResult.OK)return;context.Settings.TimerAppearance=editor.Appearance;context.Save();context.Timer.Update(context.Rounds.TimerSelected,context.Rounds.Error);}}
-  protected override void WndProc(ref Message m){if(m.Msg==0x312){if(m.WParam.ToInt32()==1)ToggleCrosshair();if(m.WParam.ToInt32()==2)ToggleTimer();}base.WndProc(ref m);}
+  protected override void WndProc(ref Message m){if(SingleInstance.ExitMessage!=0&&m.Msg==SingleInstance.ExitMessage){exit=true;Close();return;}if(m.Msg==0x312){if(m.WParam.ToInt32()==1)ToggleCrosshair();if(m.WParam.ToInt32()==2)ToggleTimer();}base.WndProc(ref m);}
   protected override void Dispose(bool disposing){
    if(disposing&&!resourcesDisposed){
     resourcesDisposed=true;Microsoft.Win32.SystemEvents.DisplaySettingsChanged-=DisplayChanged;clock.Stop();clock.Dispose();transition.Dispose();
@@ -97,9 +100,9 @@ namespace RxToolbox {
    if(!Page.Visible)return;
    overlay.Text=C.Settings.TimerVisible?"关闭悬浮计时":"开启悬浮计时";refresh.Enabled=!C.Rounds.Busy;
    var s=C.Rounds.Selected;var r=s==null?null:s.Round;name.Text=s==null?"选择服务器":s.ShortName;time.Text=Ui.Time(r==null?-1:r.Remaining(C.Settings.OffsetSeconds));
-   phase.Text=r==null?"等待同步":r.Stale?"数据过期":r.Data.round_phase;time.ForeColor=Ui.PhaseColor(phase.Text);rounds.Text="剩余回合  "+(r==null||r.Stale||r.Data.rounds_left<0?"—":r.Data.rounds_left.ToString());
-   details.Text=s==null||s.Info==null?"":s.Info.Map+"\n"+s.Info.Players+" / "+s.Info.MaxPlayers+" 人";
-   list.BeginUpdate();try{for(int i=0;i<list.Items.Count;i++){var e=C.Rounds.Servers[i];var q=e.Round;bool fresh=q!=null&&!q.Stale;string[] values={e.ShortName,q==null?"等待同步":q.Stale?"数据过期":q.Data.round_phase,fresh&&q.Data.rounds_left>=0?q.Data.rounds_left.ToString():"—",Ui.Time(q==null?-1:q.Remaining(C.Settings.OffsetSeconds)),e.Info==null?"—":e.Info.Players+"/"+e.Info.MaxPlayers,e.InfoError!=null?"—":e.Info==null?"—":e.Info.Latency+" ms",e.Info==null?"—":e.Info.Map};for(int k=0;k<values.Length;k++)if(list.Items[i].SubItems[k].Text!=values[k])list.Items[i].SubItems[k].Text=values[k];}}finally{list.EndUpdate();}
+   phase.Text=r==null?"等待同步":r.Stale?"数据过期":Privacy.Redact(r.Data.round_phase);time.ForeColor=Ui.PhaseColor(phase.Text);rounds.Text="剩余回合  "+(r==null||r.Stale||r.Data.rounds_left<0?"—":r.Data.rounds_left.ToString());
+   details.Text=s==null||s.Info==null?"":Privacy.Redact(s.Info.Map)+"\n"+s.Info.Players+" / "+s.Info.MaxPlayers+" 人";
+   list.BeginUpdate();try{for(int i=0;i<list.Items.Count;i++){var e=C.Rounds.Servers[i];var q=e.Round;bool fresh=q!=null&&!q.Stale;string[] values={e.ShortName,q==null?"等待同步":q.Stale?"数据过期":Privacy.Redact(q.Data.round_phase),fresh&&q.Data.rounds_left>=0?q.Data.rounds_left.ToString():"—",Ui.Time(q==null?-1:q.Remaining(C.Settings.OffsetSeconds)),e.Info==null?"—":e.Info.Players+"/"+e.Info.MaxPlayers,e.InfoError!=null?"—":e.Info==null?"—":e.Info.Latency+" ms",e.Info==null?"—":Privacy.Redact(e.Info.Map)};for(int k=0;k<values.Length;k++)if(list.Items[i].SubItems[k].Text!=values[k])list.Items[i].SubItems[k].Text=values[k];}}finally{list.EndUpdate();}
   }
   public override void Dispose(){C.Rounds.Changed-=Changed;base.Dispose();rowHeight.Dispose();}
  }

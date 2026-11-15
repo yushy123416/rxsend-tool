@@ -1,11 +1,30 @@
-# 本地文档、设计草图和未采用的参考素材
-/docs/*
-!/docs/nvidia-filter-compatibility.md
+# 根目录只纳入源码、验证、构建和发布所需内容
+/*
+!/.github/
+!/.gitignore
+!/.gitattributes
+!/src/
+!/tests/
+!/assets/
+!/broadcasts/
+!/updates/
+!/README.md
+!/LICENSE
+!/THIRD-PARTY-NOTICES.md
+!/*.ps1
+
+# 文档、设计记录和重复素材仅保留在本地
+/docs/
 /CHANGELOG.md
-/assets/design/
-/assets/branding/scp-reference.png
-/assets/branding/rxsend-wiki-source.svg
-/assets/branding/rxsend-wiki-reference.png
+/assets/*
+!/assets/app.ico
+!/assets/app.png
+!/assets/branding/
+/assets/branding/*
+!/assets/branding/make_icon.py
+!/assets/branding/scp-source.svg
+/broadcasts/*
+!/broadcasts/templates.json
 
 # 编译、发布产物与本机分析文件
 # updates/ 是供 Gitee 自动镜像同步的正式更新载荷，须随源码提交
@@ -49,3 +68,6 @@ venv/
 .env.*
 !.env.example
 !.env.sample
+
+# Private endpoint authoring input
+/.private/

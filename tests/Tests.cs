@@ -26,6 +26,23 @@ namespace RxToolbox {
    public void DeleteSetting(IntPtr profile,uint id){Values.Remove(id);Calls.Add("delete");}
    public void Save(){Calls.Add("save");if(FailSave)throw new IOException("driver save failed");Saves++;}
   }
+  static void PrivacyChecks(){
+   using(var rounds=new RoundService(new Settings())){
+    Check(rounds.Servers.Count==10&&rounds.Servers.All(s=>s.Key.StartsWith("server-")&&!s.Key.Contains(s.Host)),"encrypted catalog loads and selection identifiers contain no endpoints");
+    var server=rounds.Servers[0];var old=new Settings{SelectedServer=server.Host+":"+server.Port,TimerServer=rounds.Servers[1].Host+":"+rounds.Servers[1].Port};
+    using(var migrated=new RoundService(old))Check(migrated.Selected.Key==server.Key&&migrated.TimerSelected.Key==rounds.Servers[1].Key,"legacy selections migrate without losing selected servers");
+    Check(new ServerEntry{Host=server.Host,Port=server.Port}.ShortName=="未命名服务器","unnamed server never falls back to its endpoint");
+    Check(!new ServerEntry{Name="测试 "+server.Host,Host=server.Host}.ShortName.Contains(server.Host),"remote names redact embedded game addresses");
+   }
+   string message=Privacy.Redact("https://example.com/status.php 192.0.2.1:27015 [2001:db8::1]:27015 ::1");
+   Check(!message.Contains("example.com")&&!message.Contains("192.0.2.1")&&!message.Contains("2001:db8")&&!message.Contains("::1"),"URLs and IPv4 and IPv6 addresses are redacted");
+   Check(Privacy.Redact("①服 · 回合中 · 12 / 64 · 00:30")=="①服 · 回合中 · 12 / 64 · 00:30","ordinary server labels and countdown remain unchanged");
+   var settings=Settings.FromJson("{\"ApiUrl\":\"https://example.com/private\",\"SelectedServer\":\"127.0.0.1:27015\"}");
+   string serialized=Json.Write(settings);
+   Check(settings.ApiUrl=="https://example.com/private"&&!serialized.Contains("example.com")&&!serialized.Contains("127.0.0.1")&&!serialized.Contains("\"ApiUrl\""),"legacy URL migrates to user-bound encryption and JSON contains no raw endpoints");
+   Check(Settings.FromJson(serialized).ApiUrl==settings.ApiUrl,"protected custom URL round trips on the current Windows account");
+   settings.ApiUrl=Settings.DefaultApi;Check(settings.ProtectedApiUrl==null&&settings.ApiUrl==Settings.DefaultApi,"default API is resolved from encrypted catalog without persisting URL");
+  }
   static void NvidiaChecks(){
    Check(System.Runtime.InteropServices.Marshal.SizeOf(typeof(NvidiaApi.DrsSetting))==12320&&System.Runtime.InteropServices.Marshal.OffsetOf(typeof(NvidiaApi.DrsSetting),"Current").ToInt32()==8220,"NVAPI setting ABI matches NVIDIA header including both 4100-byte unions");
    Check(System.Runtime.InteropServices.Marshal.SizeOf(typeof(NvidiaApi.DrsApplication))==20492&&System.Runtime.InteropServices.Marshal.SizeOf(typeof(NvidiaApi.DrsProfile))==4116,"NVAPI application v4 and profile ABI match NVIDIA headers");
@@ -58,6 +75,9 @@ namespace RxToolbox {
     join.Start(server);await join.PollAsync();Check(join.Running&&launches==0&&queries==1,"auto join waits while server is full");
     await join.PollAsync();Check(queries==1,"auto join enforces one-second query interval");
     clock=clock.AddSeconds(1);response=new A2sInfo{Players=69,MaxPlayers=70};await join.PollAsync();await join.PollAsync();Check(!join.Running&&launches==1&&launched=="steam://connect/127.0.0.1:27015","auto join launches exactly once when a fresh query finds a slot");
+    clock=clock.AddSeconds(10);Check(join.Elapsed==TimeSpan.FromSeconds(1),"auto join elapsed time freezes when a connection is launched");
+    join.Start(server);clock=clock.AddSeconds(3);join.Stop();clock=clock.AddSeconds(5);Check(join.Elapsed==TimeSpan.FromSeconds(3),"cancelled auto join retains its elapsed time");
+    join.Start(server);Check(join.Elapsed==TimeSpan.Zero,"starting another auto join resets its elapsed time");join.Stop();
    }
    queries=0;launches=0;
    using(var join=new AutoJoinService((h,p)=>{queries++;if(queries==1)throw new IOException("timeout");return new A2sInfo{Players=1,MaxPlayers=2};},uri=>launches++,()=>clock)){
@@ -97,7 +117,101 @@ namespace RxToolbox {
   static void Reject(Action action,string name){try{action();}catch{Check(true,name);return;}throw new Exception("Expected rejection: "+name);}
   static string Encode(byte[] b,bool legacy){b[0]=(byte)(b.Skip(1).Sum(x=>(int)x)&255);BigInteger n=0;foreach(byte x in b)n=(n<<8)+x;const string a="ABCDEFGHJKLMNOPQRSTUVWXYZabcdefhijkmnopqrstuvwxyz23456789";var s=new StringBuilder();int len=legacy?25:44;for(int i=0;i<len;i++){s.Append(a[(int)(n%57)]);n/=57;}return legacy?"CSGO-"+string.Join("-",Enumerable.Range(0,5).Select(i=>s.ToString().Substring(i*5,5))):"CS"+s;}
   static byte[] InfoPacket(){using(var m=new MemoryStream())using(var w=new BinaryWriter(m)){w.Write(-1);w.Write((byte)0x49);w.Write((byte)17);foreach(string s in new[]{"测试服务器","rx_site","garrysmod","RXBreach"}){w.Write(Encoding.UTF8.GetBytes(s));w.Write((byte)0);}w.Write((ushort)4000);w.Write((byte)12);w.Write((byte)64);w.Write((byte)2);return m.ToArray();}}
+  static void BroadcastChecks(){
+   string root=Path.Combine(Path.GetTempPath(),"rx-broadcast-"+Guid.NewGuid().ToString("N"));string cache=Path.Combine(root,"templates.json");
+   try{
+    Check(object.ReferenceEquals(BroadcastTemplates.Load(cache),BroadcastTemplates.Defaults),"missing broadcast cache uses built-in templates");
+    var parsed=BroadcastTemplates.Parse("[\"喵~❤\\n第二行♥\"]");Check(parsed.Length==1&&parsed[0]=="喵~❤\n第二行♥","broadcast JSON preserves symbols and multiline text");
+    Reject(()=>BroadcastTemplates.Parse("{\"error\":\"not found\"}"),"broadcast endpoint must return an array");
+    Reject(()=>BroadcastTemplates.Parse("[null]"),"null broadcast cannot replace the cache");
+    Reject(()=>BroadcastTemplates.Parse("[123]"),"non-text broadcast is rejected");
+    Reject(()=>BroadcastTemplates.Parse("[\" \" ]"),"invalid broadcast JSON is rejected");
+    Reject(()=>BroadcastTemplates.Parse(Json.Write(new[]{new string('x',4001)})),"oversized broadcast is rejected");
+    int calls=0;var result=BroadcastTemplates.Refresh(cache,url=>{calls++;if(url==BroadcastTemplates.MirrorUrl)return "<html>error</html>";return "[\"最新广播❤\"]";});
+    Check(calls==2&&result.Cached&&result.Templates[0]=="最新广播❤"&&BroadcastTemplates.Load(cache)[0]=="最新广播❤","invalid Gitee response falls back to GitHub and caches valid templates");
+    calls=0;result=BroadcastTemplates.Refresh(cache,url=>{calls++;return "[\"镜像更新♥\"]";});
+    Check(calls==1&&result.Cached&&BroadcastTemplates.Load(cache)[0]=="镜像更新♥","valid mirror refresh replaces an existing cache without a GitHub request");
+    string before=File.ReadAllText(cache);Reject(()=>BroadcastTemplates.Refresh(cache,url=>{throw new IOException("offline");}),"offline broadcast sources report failure");
+    Check(File.ReadAllText(cache)==before,"failed refresh preserves the last valid local cache");
+    File.WriteAllText(cache,"broken");Check(object.ReferenceEquals(BroadcastTemplates.Load(cache),BroadcastTemplates.Defaults),"corrupt local cache falls back to built-in templates");
+    Check(BroadcastTemplates.Parse("[]").Length==0,"empty remote array can clear all broadcasts");
+   }finally{if(Directory.Exists(root))Directory.Delete(root,true);}
+  }
+  static void SingleInstanceChecks(){
+   string name="Local\\RxToolbox.Test."+Guid.NewGuid().ToString("N");
+   using(var owner=new System.Threading.Mutex(false,name))using(var contender=new System.Threading.Mutex(false,name)){
+    Check(SingleInstance.TryAcquire(owner),"first instance acquires its mutex");
+    Check(!Task.Run(()=>SingleInstance.TryAcquire(contender)).Result,"duplicate instance cannot acquire an owned mutex");
+    owner.ReleaseMutex();Check(SingleInstance.TryAcquire(contender),"replacement acquires the existing mutex after its owner exits");contender.ReleaseMutex();
+   }
+   using(var abandoned=new System.Threading.Mutex(false)){
+    var thread=new System.Threading.Thread(()=>abandoned.WaitOne());thread.Start();thread.Join();
+    Check(SingleInstance.TryAcquire(abandoned),"replacement can recover an abandoned instance mutex");abandoned.ReleaseMutex();
+   }
+   Check(!SingleInstance.IsApplication(System.Reflection.Assembly.GetExecutingAssembly().Location),"replacement rejects another assembly even with shared product metadata");
+  }
+  static byte[] PlayerPacket(float duration){using(var stream=new MemoryStream())using(var writer=new BinaryWriter(stream)){
+   writer.Write(-1);writer.Write((byte)0x44);writer.Write((byte)2);
+   writer.Write((byte)5);writer.Write(Encoding.UTF8.GetBytes("玩家❤"));writer.Write((byte)0);writer.Write(-3);writer.Write(duration);
+   writer.Write((byte)9);writer.Write((byte)0);writer.Write(42);writer.Write(0f);return stream.ToArray();
+  }}
+  static void PlayerQueryChecks(){
+   var data=A2s.ParsePlayers(PlayerPacket(3661.25f));Check(data.Length==2&&data[0].Name=="玩家❤"&&data[0].Score==-3&&data[0].DurationSeconds==3661.25f&&data[1].Name==""&&data[1].Index==9,"A2S player parser preserves UTF-8 names, scores, indices and session duration");
+   Reject(()=>A2s.ParsePlayers(PlayerPacket(1).Take(12).ToArray()),"truncated A2S player packet is rejected");
+   foreach(float invalid in new[]{-1f,float.NaN,float.PositiveInfinity,float.MaxValue})Reject(()=>A2s.ParsePlayers(PlayerPacket(invalid)),"invalid player duration is rejected");
+   Check(ServerDetailsModule.Duration(90061)=="25:01:01","player duration preserves hours beyond one day");
+   var order=new[]{new A2sPlayer{Name="short",DurationSeconds=1},new A2sPlayer{Name="long",DurationSeconds=7200},new A2sPlayer{Name="same",DurationSeconds=7200}};
+   var sorted=ServerDetailsModule.SortPlayers(order);Check(sorted[0].Name=="long"&&sorted[1].Name=="same"&&sorted[2].Name=="short"&&order[0].Name=="short","player list sorts by session duration descending and keeps ties stable without modifying the snapshot");
+   Check(ServerDetailsService.ParseEndpoint("127.0.0.1:27015").Port==27015&&ServerDetailsService.ParseEndpoint("[::1]:27016").Host=="::1","server details accepts IPv4 and bracketed IPv6 endpoints");
+   foreach(string invalid in new[]{"127.0.0.1","127.0.0.1:0","127.0.0.1:70000","name:27015","user@127.0.0.1:27015","127.0.0.1:27015/path"})Reject(()=>ServerDetailsService.ParseEndpoint(invalid),"invalid server details endpoint is rejected");
+   using(var udp=new UdpClient(new IPEndPoint(IPAddress.Loopback,0))){
+    udp.Client.ReceiveTimeout=4000;int port=((IPEndPoint)udp.Client.LocalEndPoint).Port;
+    var fixture=Task.Run(()=>{
+     IPEndPoint remote=null;var request=udp.Receive(ref remote);if(request.Length!=9||request[4]!=0x55||request[5]!=255)throw new Exception("invalid initial player query");
+     byte[] challenge={255,255,255,255,0x41,1,2,3,4};udp.Send(challenge,challenge.Length,remote);
+     request=udp.Receive(ref remote);if(request.Length!=9||request[4]!=0x55||!request.Skip(5).SequenceEqual(new byte[]{1,2,3,4}))throw new Exception("player challenge missing");
+     byte[] payload=PlayerPacket(3600);int half=payload.Length/2;
+     for(int index=1;index>=0;index--)using(var stream=new MemoryStream())using(var writer=new BinaryWriter(stream)){
+      writer.Write(-2);writer.Write(321);writer.Write((byte)2);writer.Write((byte)index);writer.Write((ushort)1248);writer.Write(payload,index==0?0:half,index==0?half:payload.Length-half);byte[] packet=stream.ToArray();udp.Send(packet,packet.Length,remote);
+     }
+    });
+    data=A2s.QueryPlayers("127.0.0.1",port);fixture.GetAwaiter().GetResult();Check(data.Length==2&&data[0].DurationSeconds==3600,"A2S player query negotiates a challenge and reassembles out-of-order UDP fragments");
+   }
+   byte[] basic=InfoPacket();using(var stream=new MemoryStream())using(var writer=new BinaryWriter(stream)){
+    writer.Write(basic);writer.Write((byte)'d');writer.Write((byte)'l');writer.Write((byte)0);writer.Write((byte)1);writer.Write(Encoding.UTF8.GetBytes("2026.11.15"));writer.Write((byte)0);writer.Write((byte)0x81);writer.Write((ushort)27015);writer.Write((ulong)4000);
+    var info=A2s.ParseInfo(stream.ToArray());Check(info.Folder=="garrysmod"&&info.AppId==4000&&info.System=="Linux"&&info.Vac==true&&info.Password==false&&info.Version=="2026.11.15","extended server info parses game folder, AppID, OS, VAC, password, version and extra-data fields");
+   }
+  }
+  static async Task ServerDetailsChecks(){
+   var time=new DateTime(2026,11,15,0,0,0,DateTimeKind.Utc);int infoCalls=0,playerCalls=0;bool failInfo=false,failPlayers=false;
+   var first=new ServerEntry{Host="127.0.0.1",Port=27015};var second=new ServerEntry{Host="127.0.0.2",Port=27015};
+   using(var service=new ServerDetailsService((host,port)=>{infoCalls++;if(failInfo)throw new IOException();return new A2sInfo{Name=host,Map="test"};},(host,port)=>{playerCalls++;if(failPlayers)throw new IOException();return new[]{new A2sPlayer{Name=host,DurationSeconds=100}};},()=>time)){
+    await service.PollAsync();Check(infoCalls==0&&playerCalls==0,"server details sends no query before a server is selected");
+    service.Select(first);await service.PollAsync();await service.PollAsync();service.Select(first);await service.PollAsync();Check(infoCalls==1&&playerCalls==1&&service.NextRefreshSeconds==30,"repeated selection and polling share a 30-second per-server cooldown");
+    time=time.AddSeconds(29);await service.PollAsync();Check(infoCalls==1,"server details does not refresh before 30 seconds");
+    time=time.AddSeconds(1);await service.PollAsync();Check(infoCalls==2&&playerCalls==2,"server details refreshes both info and players at 30 seconds");
+    service.Select(second);await service.PollAsync();service.Select(first);await service.PollAsync();Check(infoCalls==3&&service.Snapshot.Info.Name==first.Host,"switching back uses that server's own cached data and cooldown");
+    var cachedPlayers=service.Snapshot.Players;time=time.AddSeconds(30);failPlayers=true;await service.PollAsync();Check(service.Snapshot.InfoError==null&&service.Snapshot.PlayersError!=null&&object.ReferenceEquals(cachedPlayers,service.Snapshot.Players),"player-query failure retains its last successful list while updating server info");
+    var cachedInfo=service.Snapshot.Info;failInfo=true;time=time.AddSeconds(30);await service.PollAsync();int attempts=infoCalls;await service.PollAsync();Check(service.Snapshot.InfoError!=null&&object.ReferenceEquals(cachedInfo,service.Snapshot.Info)&&attempts==infoCalls,"failed queries retain cached info and do not cause immediate retries");
+   }
+   using(var release=new System.Threading.ManualResetEventSlim(false)){
+    var entered=new TaskCompletionSource<bool>();int queried=0;
+    using(var service=new ServerDetailsService((host,port)=>{if(++queried==1){entered.SetResult(true);if(!release.Wait(5000))throw new TimeoutException();}return new A2sInfo{Name=host};},(host,port)=>new A2sPlayer[0],()=>time)){
+     service.Select(first);var pending=service.PollAsync();await entered.Task;service.Select(second);await service.PollAsync();Check(queried==1,"switching servers does not overlap an in-flight details query");release.Set();await pending;
+     Check(service.Snapshot.Info==null,"an old response cannot populate the newly selected server");await service.PollAsync();Check(service.Snapshot.Info.Name==second.Host&&queried==2,"newly selected server is queried after the previous query finishes");
+    }
+   }
+   using(var release=new System.Threading.ManualResetEventSlim(false)){
+    var entered=new TaskCompletionSource<bool>();int playerQueries=0;
+    var service=new ServerDetailsService((host,port)=>{entered.SetResult(true);release.Wait(5000);return new A2sInfo();},(host,port)=>{playerQueries++;return new A2sPlayer[0];},()=>time);
+    service.Select(first);var pending=service.PollAsync();await entered.Task;service.Dispose();release.Set();await pending;Check(playerQueries==0&&service.Snapshot.Info==null,"disposing details service prevents late UI data and further player requests");
+   }
+  }
   [STAThread]public static int Main(){try{
+   PlayerQueryChecks();Task.Run((Func<Task>)ServerDetailsChecks).GetAwaiter().GetResult();
+   SingleInstanceChecks();
+   PrivacyChecks();
+   BroadcastChecks();
    NvidiaChecks();
    var cs=CrosshairImport.Parse("CSvbPubOq37zTGqtsPTP5QTrp5CB4xFXiKRLfzJsm49ZRe");Check(cs.Red==255&&cs.Green==0&&cs.Blue==0&&cs.Length==5&&cs.Thickness==1&&cs.Dot&&cs.ReferenceHeight==768,"current CS2 reference vector");
    var old=CrosshairImport.Parse("CSGO-Cn37R-YE7vo-pLCAL-aURmZ-z6zkG");Check(old.Source.Contains("旧版"),"legacy CSGO reference vector");
@@ -114,7 +228,7 @@ namespace RxToolbox {
    var round=RoundSnapshot.Create(new ApiServer{round_time_left=923,rounds_left=0,updated_at=now-3},now,DateTime.UtcNow);Check(round.Remaining(0)<=920&&round.Remaining(0)>=919&&!round.Stale,"countdown compensates sample age");Check(round.Data.rounds_left==0,"zero remaining rounds preserved");
    round=RoundSnapshot.Create(new ApiServer{round_time_left=923,updated_at=now-100},now,DateTime.UtcNow);Check(round.Stale&&round.Remaining(0)==-1,"stale snapshot never displays live time");
    round=RoundSnapshot.Create(new ApiServer{round_time_left=-1,updated_at=now},now,DateTime.UtcNow);Check(round.Remaining(30)==-1,"idle sentinel preserved");
-   var env=Json.Read<ApiEnvelope>("{\"server_time\":1794471201,\"servers\":[{\"ip\":\"202.189.21.228\",\"port\":27076,\"rounds_left\":1,\"round_time_left\":923,\"round_phase\":\"回合中\",\"updated_at\":1794471201}]}");Check(env.servers[0].round_time_left==923,"actual API schema");
+   var env=Json.Read<ApiEnvelope>("{\"server_time\":1794471201,\"servers\":[{\"ip\":\"127.0.0.1\",\"port\":27076,\"rounds_left\":1,\"round_time_left\":923,\"round_phase\":\"回合中\",\"updated_at\":1794471201}]}");Check(env.servers[0].round_time_left==923,"actual API schema");
    var info=A2s.ParseInfo(InfoPacket());Check(info.Name=="测试服务器"&&info.Players==12&&info.MaxPlayers==64&&info.Map=="rx_site","A2S UTF-8 response parser");Reject(()=>A2s.ParseInfo(new byte[]{255,255,255,255,0x49}),"truncated A2S packet");
    UdpFixture();
    Reject(()=>Updates.Validate(new UpdateManifest{version="1.1.0",url="https://example.com/app.exe",sha256="wrong"}),"update checksum mandatory");Reject(()=>HttpData.Https("http://example.com"),"reject insecure update source");

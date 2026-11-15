@@ -26,9 +26,10 @@ namespace RxToolbox {
  }
  internal sealed class AutoJoinService : IDisposable {
   readonly Func<string,int,A2sInfo> query;readonly Action<string> launch;readonly Func<DateTime> now;
-  readonly object claim=new object();int generation;bool busy,disposed;DateTime nextQuery;string host,name;int port;ServerEntry[] targets;
+  readonly object claim=new object();int generation;bool busy,disposed;DateTime nextQuery,stoppedAt;string host,name;int port;ServerEntry[] targets;
   public bool Running {get;private set;}public string Status {get;private set;}public string ServerKey {get;private set;}
   public int QueryCount {get;private set;}public int FailureCount {get;private set;}public DateTime StartedAt {get;private set;}public bool Querying {get{return busy;}}public int NextQueryMs {get{return Math.Max(0,(int)(nextQuery-now()).TotalMilliseconds);}}
+  public TimeSpan Elapsed {get{if(StartedAt==DateTime.MinValue)return TimeSpan.Zero;var duration=(Running?now():stoppedAt)-StartedAt;return duration<TimeSpan.Zero?TimeSpan.Zero:duration;}}
   public readonly Queue<string> Activity=new Queue<string>();
   void Record(string message){lock(claim){Activity.Enqueue(now().ToLocalTime().ToString("HH:mm:ss")+"  "+message);while(Activity.Count>6)Activity.Dequeue();}}
   public event Action Changed;
@@ -42,7 +43,7 @@ namespace RxToolbox {
    if(disposed)throw new ObjectDisposedException("AutoJoinService");if(server==null)throw new ArgumentException("请先选择服务器");
    SteamConnect.BuildUri(server.Host,server.Port);QueryCount=0;FailureCount=0;StartedAt=now();Activity.Clear();Record("任务启动，等待人数响应");targets=new[]{server};generation++;host=server.Host;port=server.Port;name=server.ShortName;ServerKey=server.Key;nextQuery=DateTime.MinValue;Running=true;Status="等待空位 · "+name;Notify();
   }
-  public void Stop(){generation++;if(!Running)return;Running=false;Status="已取消自动进服 · "+name;Notify();}
+  public void Stop(){generation++;if(!Running)return;stoppedAt=now();Running=false;Status="已取消自动进服 · "+name;Notify();}
   public async void Tick(){await PollAsync();}
   internal async Task PollAsync(){
    if(disposed||!Running||busy||now()<nextQuery)return;
@@ -59,12 +60,12 @@ namespace RxToolbox {
     QueryCount++;Record(server.ShortName+"  "+info.Players+"/"+info.MaxPlayers+"  ·  "+watch.ElapsedMilliseconds+" ms");server.Info=info;server.InfoError=null;
     Status="等待空位 · "+server.ShortName+" · "+info.Players+"/"+info.MaxPlayers+" · 查询 "+watch.ElapsedMilliseconds+" ms";
     if(info.Players>=info.MaxPlayers)return;
-    lock(claim){if(disposed||ticket!=generation||!Running)return;Running=false;generation++;ServerKey=server.Key;}
+    lock(claim){if(disposed||ticket!=generation||!Running)return;stoppedAt=now();Running=false;generation++;ServerKey=server.Key;}
     try{launch(SteamConnect.BuildUri(server.Host,server.Port));Status="已发起连接 · "+server.ShortName+" · 其他目标已停止";}
-    catch(Exception ex){Status="无法发起进服："+ex.Message;}
+    catch(Exception ex){Log.Write(ex);Status="无法发起进服，请检查 Steam 是否可用";}
     Notify();
    }catch(Exception){if(!disposed&&ticket==generation&&Running){QueryCount++;FailureCount++;Record(server.ShortName+"  查询超时/失败，等待重试");server.InfoError="查询失败";Status="人数查询失败，将重试 · "+server.ShortName;}}
   }
-  public void Dispose(){disposed=true;generation++;Running=false;}
+  public void Dispose(){disposed=true;generation++;if(Running)stoppedAt=now();Running=false;}
  }
 }

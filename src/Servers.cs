@@ -25,8 +25,8 @@ namespace RxToolbox {
  public sealed class ServerEntry {
   public string Host,Name; public int Port; public RoundSnapshot Round; public A2sInfo Info; public DateTime InfoAt;
   public string InfoError="尚未查询";
-  public string Key {get {return Host+":"+Port;} }
-  public string ShortName { get { var n=Name??Key; int bar=n.IndexOf('|'); if(bar>=0)n=n.Substring(0,bar); return n.Replace("[CN]Neo RXBreach ",""); } }
+  public string Key {get {return Privacy.ServerKey(Host,Port);} }
+  public string ShortName { get { var n=string.IsNullOrWhiteSpace(Name)?"未命名服务器":Privacy.Redact(Name); int bar=n.IndexOf('|'); if(bar>=0)n=n.Substring(0,bar); return n.Replace("[CN]Neo RXBreach ",""); } }
   public override string ToString() { return ShortName; }
  }
  public static class HttpData {
@@ -47,9 +47,14 @@ namespace RxToolbox {
   readonly Settings settings; readonly SemaphoreSlim gate=new SemaphoreSlim(3); bool busy,disposed; DateTime lastA2s=DateTime.MinValue;
   public readonly List<ServerEntry> Servers=new List<ServerEntry>(); public string Error; public DateTime LastSuccess; public event Action Changed;
   public RoundService(Settings s) {settings=s;
-   string[] hosts={"202.189.21.228","202.189.23.252","43.249.193.77"}; int[][] ports={new[]{27076,27265,27852,31284},new[]{27045,27235,27265},new[]{27076,27265,27852}};
-   string[][] names={new[]{"娘娘测试服","白菜测试服","猫娘窝测试服","兑换服"},new[]{"④服","⑤服","⑥服"},new[]{"①服","②服","③服"}};
-   for(int h=0;h<3;h++) for(int i=0;i<ports[h].Length;i++) Servers.Add(new ServerEntry{Host=hosts[h],Port=ports[h][i],Name=names[h][i]});
+   Servers.AddRange(EndpointCatalog.Servers);
+   settings.SelectedServer=MigrateKey(settings.SelectedServer,true);
+   settings.TimerServer=MigrateKey(settings.TimerServer,false);
+  }
+  string MigrateKey(string value,bool primary){
+   if(string.IsNullOrEmpty(value))return primary?Servers[0].Key:"";
+   var match=Servers.FirstOrDefault(x=>x.Key==value||x.Host+":"+x.Port==value);
+   return match!=null?match.Key:value.StartsWith("server-",StringComparison.Ordinal)?value:primary?Servers[0].Key:"";
   }
   public bool Busy {get {return busy;} }
   public async void Refresh(bool force) {
@@ -64,14 +69,14 @@ namespace RxToolbox {
      int accepted=0;
      foreach(var row in env.servers.Take(128)) { IPAddress ip; if(row==null||!IPAddress.TryParse(row.ip,out ip)||row.port<1||row.port>65535||row.updated_at<=0||row.round_time_left< -1||row.round_time_left>86400) continue;
       var server=Servers.FirstOrDefault(x=>x.Host==row.ip&&x.Port==row.port); if(server==null) {server=new ServerEntry{Host=row.ip,Port=row.port};Servers.Add(server);}
-      server.Name=row.server_name??server.Name; server.Round=RoundSnapshot.Create(row,env.server_time,DateTime.UtcNow); accepted++;
+      server.Name=Privacy.Redact(row.server_name)??server.Name; server.Round=RoundSnapshot.Create(row,env.server_time,DateTime.UtcNow); accepted++;
      }
      if(accepted==0) throw new InvalidDataException("回合接口没有有效服务器数据");
      Error=null; LastSuccess=DateTime.UtcNow;
-    } catch(Exception ex) {Error=ex is WebException?"回合接口连接失败":ex.Message;}
+    } catch(Exception ex) {Error=ex is WebException?"回合接口连接失败":"回合接口数据无效，请稍后重试";}
     if(!disposed&&Changed!=null) Changed();
     await infoTask;
-   } catch(Exception ex) { Error=ex.Message; Log.Write(ex); }
+   } catch(Exception ex) { Error="服务器信息刷新失败，请稍后重试"; Log.Write(ex); }
    finally {busy=false; if(!disposed&&Changed!=null)Changed();}
   }
   async Task Query(ServerEntry s) {
@@ -84,8 +89,21 @@ namespace RxToolbox {
   public ServerEntry TimerSelected {get {return string.IsNullOrEmpty(settings.TimerServer)?Selected:Servers.FirstOrDefault(x=>x.Key==settings.TimerServer)??Selected;} }
   public void Dispose() {disposed=true;}
  }
- public sealed class A2sInfo { public string Name,Map,Game; public int Players,MaxPlayers,Bots,Latency; }
+ public sealed class A2sInfo { public string Name,Map,Game,Folder,Version,System; public int Players,MaxPlayers,Bots,Latency,AppId;public bool? Password,Vac; }
+ public sealed class A2sPlayer {public byte Index;public string Name;public int Score;public float DurationSeconds;}
  public static class A2s {
+  public static A2sPlayer[] QueryPlayers(string host,int port){return ParsePlayers(Exchange(host,port,new byte[]{255,255,255,255,0x55,255,255,255,255}));}
+  public static A2sPlayer[] ParsePlayers(byte[] bytes){
+   using(var reader=new BinaryReader(new MemoryStream(bytes),Encoding.UTF8)){
+    Header(reader,0x44);int count=reader.ReadByte();var players=new A2sPlayer[count];
+    for(int i=0;i<count;i++){
+     var player=new A2sPlayer{Index=reader.ReadByte(),Name=Z(reader),Score=reader.ReadInt32(),DurationSeconds=reader.ReadSingle()};
+     if(float.IsNaN(player.DurationSeconds)||float.IsInfinity(player.DurationSeconds)||player.DurationSeconds<0||player.DurationSeconds>int.MaxValue)throw new InvalidDataException("玩家在线时长无效");
+     players[i]=player;
+    }
+    return players;
+   }
+  }
   public static A2sInfo QueryInfo(string host,int port) {
    var watch=Stopwatch.StartNew(); var body=Exchange(host,port,new byte[]{255,255,255,255,0x54}.Concat(Encoding.ASCII.GetBytes("Source Engine Query\0")).ToArray());
    var info=ParseInfo(body); info.Latency=(int)watch.ElapsedMilliseconds; return info;
@@ -98,7 +116,7 @@ namespace RxToolbox {
    }
   }
   static byte[] Exchange(string host,int port,byte[] query) {
-   using(var udp=new UdpClient()) {
+   IPAddress ip;using(var udp=new UdpClient(IPAddress.TryParse(host,out ip)?ip.AddressFamily:AddressFamily.InterNetwork)) {
     udp.Client.ReceiveTimeout=1800;udp.Client.SendTimeout=1800;udp.Connect(host,port); udp.Send(query,query.Length);
     for(int challenge=0;challenge<3;challenge++) {
      var data=Receive(udp);
@@ -130,7 +148,13 @@ namespace RxToolbox {
   }
   public static A2sInfo ParseInfo(byte[] b) {
    using(var r=new BinaryReader(new MemoryStream(b),Encoding.UTF8)) {
-    Header(r,0x49);r.ReadByte();var i=new A2sInfo();i.Name=Z(r);i.Map=Z(r);Z(r);i.Game=Z(r);r.ReadUInt16();i.Players=r.ReadByte();i.MaxPlayers=r.ReadByte();i.Bots=r.ReadByte();return i;
+    Header(r,0x49);r.ReadByte();var i=new A2sInfo();i.Name=Z(r);i.Map=Z(r);i.Folder=Z(r);i.Game=Z(r);i.AppId=r.ReadUInt16();i.Players=r.ReadByte();i.MaxPlayers=r.ReadByte();i.Bots=r.ReadByte();
+    if(r.BaseStream.Position<r.BaseStream.Length){
+     r.ReadByte();char environment=(char)r.ReadByte();i.System=environment=='l'?"Linux":environment=='w'?"Windows":environment=='m'||environment=='o'?"macOS":environment.ToString();
+     i.Password=r.ReadByte()!=0;i.Vac=r.ReadByte()!=0;i.Version=Z(r);
+     if(r.BaseStream.Position<r.BaseStream.Length){int flags=r.ReadByte();if((flags&0x80)!=0)r.ReadUInt16();if((flags&0x10)!=0)r.ReadUInt64();if((flags&0x40)!=0){r.ReadUInt16();Z(r);}if((flags&0x20)!=0)Z(r);if((flags&0x01)!=0)i.AppId=(int)(r.ReadUInt64()&0xFFFFFF);}
+    }
+    return i;
    }
   }
   static void Header(BinaryReader r,int type){if(r.ReadInt32()!=-1||r.ReadByte()!=type)throw new InvalidDataException("A2S 响应类型无效");}

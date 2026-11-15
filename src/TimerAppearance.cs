@@ -34,7 +34,7 @@ namespace RxToolbox {
  internal sealed class TimerContent {
   public string Name,Time,Phase,Rounds;
   public string Text(string id){return id=="name"?Name:id=="time"?Time:id=="phase"?Phase:Rounds;}
-  public static TimerContent From(ServerEntry server,int offset){var r=server==null?null:server.Round;return new TimerContent{Name=server==null?"选择服务器":server.ShortName,Time=Ui.Time(r==null?-1:r.Remaining(offset)),Phase=r==null?"等待同步":r.Stale?"数据过期":r.Data.round_phase,Rounds="剩余 "+(r==null||r.Stale||r.Data.rounds_left<0?"—":r.Data.rounds_left.ToString())+" 回合"};}
+  public static TimerContent From(ServerEntry server,int offset){var r=server==null?null:server.Round;return new TimerContent{Name=server==null?"选择服务器":server.ShortName,Time=Ui.Time(r==null?-1:r.Remaining(offset)),Phase=r==null?"等待同步":r.Stale?"数据过期":Privacy.Redact(r.Data.round_phase),Rounds="剩余 "+(r==null||r.Stale||r.Data.rounds_left<0?"—":r.Data.rounds_left.ToString())+" 回合"};}
   public static TimerContent Sample {get{return new TimerContent{Name="娘娘测试服",Time="04:32",Phase="回合中",Rounds="剩余 12 回合"};}}
  }
  internal static class TimerRenderer {

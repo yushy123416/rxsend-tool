@@ -12,14 +12,9 @@ License: Creative Commons Attribution-ShareAlike 3.0 Unported
 https://creativecommons.org/licenses/by-sa/3.0/
 
 Changes by yushy: placed the emblem on a white rounded tile and added the blue
-"rxsend tool" corner label. These icon adaptations (assets/app.png,
-assets/app.ico, assets/branding/scp-rxsend-tool.svg and .png) are distributed
+"rxsend tool" corner label. These icon adaptations (assets/app.png and assets/app.ico) are distributed
 under CC BY-SA 3.0. The application source code remains GPL-3.0-only.
 Neither the SCP Foundation community nor the original authors endorse this tool.
-
-The unused RXSend Wiki reference in assets/branding/rxsend-wiki-source.svg
-and rxsend-wiki-reference.png is credited to dx_seagulls, from
-https://wiki-cn.rxsend.cn/ (site default CC BY-SA 3.0).
 
 ## Counter-Strike share-code format
 

@@ -4,6 +4,8 @@ using System.Diagnostics;
 using System.Drawing;
 using System.IO;
 using System.Reflection;
+using System.Security.Cryptography;
+using System.Text;
 using System.Threading;
 using System.Web.Script.Serialization;
 using System.Windows.Forms;
@@ -21,23 +23,29 @@ namespace RxToolbox {
   [STAThread] public static void Main(string[] args) {
    if (args.Length > 0 && args[0] == "--apply-update") { Updates.Apply(args); return; }
    if (args.Length > 0 && args[0] == "--nvidia-filters") { try { NvidiaFilters.RunHelper(args); } catch(Exception e) { Log.Write(e); Environment.ExitCode=1; } return; }
-   bool first;
-   using (var mutex = new Mutex(true, "Local\\RxToolbox.v1", out first)) {
-    if (!first) { MessageBox.Show("RX Toolbox 已在系统托盘运行。", "RX Toolbox"); return; }
-    System.Net.ServicePointManager.SecurityProtocol = (System.Net.SecurityProtocolType)0;
-    Application.EnableVisualStyles(); Application.SetCompatibleTextRenderingDefault(false);
-    Application.ThreadException += delegate(object s, ThreadExceptionEventArgs e) { Log.Write(e.Exception); MessageBox.Show(e.Exception.Message, "操作未完成"); };
-    try { using (var app = new MainWindow()) Application.Run(app); } catch(Exception e) { Log.Write(e); MessageBox.Show(e.Message,"无法启动 RX Toolbox"); }
+   System.Net.ServicePointManager.SecurityProtocol = (System.Net.SecurityProtocolType)0;
+   Application.EnableVisualStyles(); Application.SetCompatibleTextRenderingDefault(false);
+   using (var mutex = new Mutex(false, SingleInstance.MutexName)) {
+    bool owns=SingleInstance.TryAcquire(mutex);
+    if (!owns) { using(var dialog=new DuplicateInstanceDialog(mutex))owns=dialog.ShowDialog()==DialogResult.OK;if(!owns)return; }
+    Application.ThreadException += delegate(object s, ThreadExceptionEventArgs e) { Log.Write(e.Exception); MessageBox.Show(Privacy.Redact(e.Exception.Message), "操作未完成"); };
+    try { using (var app = new MainWindow()) Application.Run(app); } catch(Exception e) { Log.Write(e); MessageBox.Show(Privacy.Redact(e.Message),"无法启动 RX Toolbox"); }
+    finally{mutex.ReleaseMutex();}
    }
   }
  }
  internal static class Log {
-  public static void Write(Exception e) { try { Directory.CreateDirectory(Settings.Folder); string p=Path.Combine(Settings.Folder,"errors.log"); if(File.Exists(p) && new FileInfo(p).Length>256000) File.Delete(p); File.AppendAllText(p,DateTime.UtcNow.ToString("o")+" "+e+Environment.NewLine); } catch {} }
+  public static void Write(Exception e) { try { Directory.CreateDirectory(Settings.Folder); string p=Path.Combine(Settings.Folder,"errors.log"); if(File.Exists(p) && new FileInfo(p).Length>256000) File.Delete(p); File.AppendAllText(p,DateTime.UtcNow.ToString("o")+" "+Privacy.Redact(e.ToString())+Environment.NewLine); } catch {} }
  }
  public sealed class Settings {
-  public const string DefaultApi="https://neomio.nigigasaki.live/status.php";
+  public static string DefaultApi {get{return EndpointCatalog.Api;}}
   public static readonly string Folder=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"RxToolbox");
-  public string ApiUrl=DefaultApi, SelectedServer="202.189.21.228:27076", GithubRepo=Updates.DefaultRepository, MirrorUrl=Updates.DefaultMirrorUrl, ScreenDevice="";
+  public string SelectedServer="", GithubRepo=Updates.DefaultRepository, MirrorUrl=Updates.DefaultMirrorUrl, ScreenDevice="";
+  public string ProtectedApiUrl;
+  [ScriptIgnore] public string ApiUrl {
+   get {if(string.IsNullOrEmpty(ProtectedApiUrl))return DefaultApi;try{return Encoding.UTF8.GetString(ProtectedData.Unprotect(Convert.FromBase64String(ProtectedApiUrl),null,DataProtectionScope.CurrentUser));}catch{throw new InvalidDataException("本机连接配置无法解密，请重置设置。");}}
+   set {ProtectedApiUrl=string.IsNullOrEmpty(value)||value==DefaultApi?null:Convert.ToBase64String(ProtectedData.Protect(Encoding.UTF8.GetBytes(HttpData.Https(value).AbsoluteUri),null,DataProtectionScope.CurrentUser));}
+  }
   public string TimerServer="";
   public bool TimerVisible=false, CrosshairVisible=false, CloseToTray=true, AutoCheck=false;
   public int TimerX=32, TimerY=80, OffsetSeconds=0, CrosshairX=0, CrosshairY=0;
@@ -47,8 +55,15 @@ namespace RxToolbox {
   public CrosshairProfile Crosshair=new CrosshairProfile();
   public List<CrosshairPreset> Presets=new List<CrosshairPreset>();
   public static Settings Load() {
-   try { var s=Json.Read<Settings>(File.ReadAllText(Path.Combine(Folder,"settings.json"))); if(s==null) return new Settings(); s.Crosshair=s.Crosshair??new CrosshairProfile(); s.Crosshair.Validate(); if(s.CrosshairDisplayVersion<2){if(s.CrosshairScale==1)s.CrosshairScale=2;s.CrosshairDisplayVersion=2;} s.CrosshairScale=Math.Max(.25f,Math.Min(4,s.CrosshairScale)); s.OffsetSeconds=Math.Max(-300,Math.Min(300,s.OffsetSeconds)); s.Presets=s.Presets??new List<CrosshairPreset>();s.TimerAppearance=s.TimerAppearance??new TimerAppearance();s.TimerAppearance.Validate();Updates.UseDefaultSource(s); return s; }
+   try { var text=File.ReadAllText(Path.Combine(Folder,"settings.json")); var s=FromJson(text); if(s==null) return new Settings(); s.Crosshair=s.Crosshair??new CrosshairProfile(); s.Crosshair.Validate(); if(s.CrosshairDisplayVersion<2){if(s.CrosshairScale==1)s.CrosshairScale=2;s.CrosshairDisplayVersion=2;} s.CrosshairScale=Math.Max(.25f,Math.Min(4,s.CrosshairScale)); s.OffsetSeconds=Math.Max(-300,Math.Min(300,s.OffsetSeconds)); s.Presets=s.Presets??new List<CrosshairPreset>();s.TimerAppearance=s.TimerAppearance??new TimerAppearance();s.TimerAppearance.Validate();Updates.UseDefaultSource(s); try{s.Save();}catch(Exception e){Log.Write(e);} return s; }
    catch(Exception e) { if(!(e is FileNotFoundException)&&!(e is DirectoryNotFoundException)) Log.Write(e); return new Settings(); }
+  }
+  internal static Settings FromJson(string text){
+   var s=Json.Read<Settings>(text);if(s==null)return null;
+   var legacy=Json.Read<Dictionary<string,object>>(text);object api;
+   if(legacy.TryGetValue("ApiUrl",out api)&&api is string)s.ApiUrl=(string)api;
+   using(var rounds=new RoundService(s)){} // Convert legacy IP:port selections before saving.
+   return s;
   }
   public void Save() {
    Directory.CreateDirectory(Folder); var p=Path.Combine(Folder,"settings.json"); var temp=p+".tmp";

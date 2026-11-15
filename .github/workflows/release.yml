@@ -13,10 +13,10 @@ jobs:
         shell: pwsh
         run: |
           ./build.ps1 -Test
-          ./tests/UpdateSmoke.ps1
           $version=[Reflection.AssemblyName]::GetAssemblyName((Resolve-Path './dist/RXSendTool.exe')).Version.ToString(3)
           if ($env:GITHUB_REF_NAME -ne "v$version") { throw 'Tag and executable version differ' }
           ./publish-manifest.ps1 -Repository $env:GITHUB_REPOSITORY -UsePrepared
+          ./tests/UpdateSmoke.ps1
           ./release-notes.ps1 -Repository $env:GITHUB_REPOSITORY -Version $version
       - name: Create draft release
         shell: pwsh

@@ -18,6 +18,7 @@ if ($Test) {
 Copy-Item "$root/LICENSE" "$root/dist/LICENSE" -Force
 Copy-Item "$root/THIRD-PARTY-NOTICES.md" "$root/dist/THIRD-PARTY-NOTICES.md" -Force
 Copy-Item "$root/build/RxToolbox.exe" "$root/dist/RXSendTool.exe" -Force
+& "$root/tests/VerifyEndpointPrivacy.ps1" -ArtifactPath "$root/dist/RXSendTool.exe"
 foreach ($legacyName in @('RxToolbox.exe','RxToolbox.Tests.exe')) {
     $legacyFile=Join-Path "$root/dist" $legacyName
     if (Test-Path -LiteralPath $legacyFile) {
