@@ -1,4 +1,4 @@
-param([string]$Version='1.0.2',[string]$Repository='yushy123416/rxsend-tool',[string]$GiteeRepository='ysyyyy/rxsend-tool')
+param([string]$Version='1.0.3',[string]$Repository='yushy123416/rxsend-tool',[string]$GiteeRepository='ysyyyy/rxsend-tool')
 $ErrorActionPreference='Stop'
 $readme=Get-Content -LiteralPath (Join-Path $PSScriptRoot 'README.md') -Raw -Encoding UTF8
 function Get-ReadmeSection([string]$heading){
@@ -31,12 +31,13 @@ $requirements
 
 ## 升级说明
 
-- 已安装用户可通过程序自动更新，或退出旧版后直接运行新版 EXE。
+- v1.0.3 起，程序先显示更新公告，由用户确认后下载、校验并安装重启；也可退出旧版后直接运行新版 EXE。旧版仍按其原有更新逻辑升级。
 - 首次启动会迁移原有连接设置与服务器选择；自定义信息接口的加密设置绑定当前 Windows 用户。
 - 重复启动时，可选择关闭上一个程序再打开当前版本；旧实例的监听任务与悬浮窗会停止。
 - 玩家在线时长为服务器返回的本次连接时长，不代表 Steam 累计游戏时间；服务器未开放玩家查询时无法展示明细。
 - 地址加密与混淆用于降低意外暴露和静态提取的便利性，不能阻止运行时分析或网络连接观察，也不会清除旧版本已公开的地址。
 - NVIDIA 滤镜仍为实验性功能，配置成功不代表所有驱动、游戏或滤镜组合均可用。
+- GMod 全屏叠加默认关闭，仅支持 Windows 64 位 GMod / DirectX 9；启用前必须确认风险，可能被反作弊拦截或引起崩溃、覆盖层冲突，不保证服务器兼容性。
 
 ## 文档与许可
 

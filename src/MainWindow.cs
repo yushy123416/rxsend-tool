@@ -10,17 +10,19 @@ namespace RxToolbox {
   readonly List<IToolModule> modules=new List<IToolModule>();readonly List<FlatButton> nav=new List<FlatButton>();
   readonly Panel host=new BufferedPanel();readonly Label status;readonly NotifyIcon tray;readonly Timer clock=new Timer();readonly Timer transition=new Timer{Interval=15};Control entering;int animationStep;ToolContext context;bool exit,resourcesDisposed;DateTime nextPoll=DateTime.MinValue;
   readonly ToastNotification toast=new ToastNotification();
+  readonly UpdateBadge updateBadge=new UpdateBadge{Bounds=new Rectangle(90,78,96,28),Visible=false};
   internal float UiScale=1;internal bool AutomaticUpdatesEnabled=true,AutomaticTemplateUpdatesEnabled=true,AutomaticServerQueriesEnabled=true;
   public MainWindow() {
    SuspendLayout();
    Text="RXSend Tool";ClientSize=new Size(1200,820);MinimumSize=new Size(1036,739);StartPosition=FormStartPosition.CenterScreen;BackColor=Ui.Bg;ForeColor=Ui.Text;Font=Ui.Body;AutoScaleMode=AutoScaleMode.None;Icon=Icon.ExtractAssociatedIcon(Application.ExecutablePath)??SystemIcons.Application;DoubleBuffered=true;
    var side=new Panel{BackColor=Ui.Side,Dock=DockStyle.Left,Size=new Size(208,820)};Controls.Add(side);
    Ui.Label(side,"RXSend Tool",26,36,170,36,Ui.Heading);
-   Ui.Label(side,"v"+Updates.Current.ToString(3),26,80,170,24,Ui.Small,Ui.Muted);
+   Ui.Label(side,"v"+Updates.Current.ToString(3),26,80,62,24,Ui.Small,Ui.Muted);
+   side.Controls.Add(updateBadge);updateBadge.Click+=async delegate{foreach(var module in modules){var settings=module as SettingsModule;if(settings!=null)await settings.ShowUpdateAnnouncement();}};
    host.Location=new Point(236,24);host.Size=new Size(936,746);host.Anchor=AnchorStyles.Top|AnchorStyles.Bottom|AnchorStyles.Left|AnchorStyles.Right;Controls.Add(host);
    status=Ui.Label(this,"",236,786,936,24,Ui.Small,Ui.Muted);status.Anchor=AnchorStyles.Left|AnchorStyles.Bottom|AnchorStyles.Right;
    Controls.Add(toast);toast.BringToFront();host.SizeChanged+=delegate{toast.Position(host.Bounds,UiScale);};host.LocationChanged+=delegate{toast.Position(host.Bounds,UiScale);};
-   context=new ToolContext{Settings=Settings.Load(),Window=this};context.Rounds=new RoundService(context.Settings);context.AutoJoin=new AutoJoinService();context.Crosshair=new CrosshairOverlay();context.Timer=new TimerOverlay(context.Settings,context.Rounds);context.Timer.Moved+=context.Save;context.Timer.SelectionChanged+=context.Save;context.Timer.ConfigureRequested+=EditTimer;
+   context=new ToolContext{Settings=Settings.Load(),Window=this};context.Rounds=new RoundService(context.Settings);context.AutoJoin=new AutoJoinService();context.Crosshair=new CrosshairOverlay();context.Timer=new TimerOverlay(context.Settings,context.Rounds);context.Timer.Moved+=context.Save;context.Timer.SelectionChanged+=context.Save;context.Timer.ConfigureRequested+=EditTimer;context.Fullscreen=new FullscreenOverlay(context);
    modules.Add(new RoundsModule(context));modules.Add(new ServerDetailsModule(context));modules.Add(new CrosshairModule(context));modules.Add(new AutoJoinModule(context));modules.Add(new NvidiaFiltersModule(context));modules.Add(new BroadcastModule(context));modules.Add(new SettingsModule(context));
    string[] glyphs={"\uE916","\uE946","\uE81D","\uE768","\uE790","\uE789","\uE713"};
    for(int i=0;i<modules.Count;i++){int index=i;bool bottom=i==modules.Count-1;var b=Ui.Button(side,modules[i].Title,12,bottom?760:188+i*52,184,()=>SelectModule(index));b.Height=44;b.Navigation=true;b.Glyph=glyphs[i];b.BackColor=Ui.Side;if(bottom)b.Anchor=AnchorStyles.Left|AnchorStyles.Bottom;nav.Add(b);modules[i].View.Dock=DockStyle.Fill;modules[i].View.Visible=false;host.Controls.Add(modules[i].View);}
@@ -28,7 +30,7 @@ namespace RxToolbox {
    var menu=new ContextMenuStrip();menu.Items.Add("打开工具箱",null,delegate{Restore();});menu.Items.Add("显示 / 隐藏准星",null,delegate{ToggleCrosshair();});menu.Items.Add("显示 / 隐藏计时",null,delegate{ToggleTimer();});menu.Items.Add("取消自动进服",null,delegate{context.AutoJoin.Stop();});menu.Items.Add(new ToolStripSeparator());menu.Items.Add("退出",null,delegate{exit=true;Close();});
    tray=new NotifyIcon{Text="RXSend Tool",Icon=Icon,Visible=true,ContextMenuStrip=menu};tray.DoubleClick+=delegate{Restore();};context.AutoJoin.Changed+=delegate{if(!context.AutoJoin.Running&&!string.IsNullOrEmpty(context.AutoJoin.Status)&&!context.AutoJoin.Status.StartsWith("已取消")){tray.ShowBalloonTip(4000,"自动进服",context.AutoJoin.Status,ToolTipIcon.Info);}foreach(var module in modules)if(module is AutoJoinModule)module.Tick();};
    clock.Interval=1000;clock.Tick+=delegate{Tick();};clock.Start();
-   Shown+=delegate{int dark=0;try{Native.DwmSetWindowAttribute(Handle,20,ref dark,4);}catch{}bool a=Native.RegisterHotKey(Handle,1,0x4003,(uint)Keys.F8),b=Native.RegisterHotKey(Handle,2,0x4003,(uint)Keys.F9);if(!a||!b)SetStatus("部分快捷键被其他程序占用，请使用托盘菜单");context.UpdateCrosshair();context.Timer.Update(context.Rounds.TimerSelected,context.Rounds.Error);if(context.Settings.TimerVisible)context.Timer.Show();Tick();if(AutomaticUpdatesEnabled)foreach(var module in modules){var settings=module as SettingsModule;if(settings!=null)settings.StartAutoUpdate();}};
+   Shown+=delegate{int dark=0;try{Native.DwmSetWindowAttribute(Handle,20,ref dark,4);}catch{}bool a=Native.RegisterHotKey(Handle,1,0x4003,(uint)Keys.F8),b=Native.RegisterHotKey(Handle,2,0x4003,(uint)Keys.F9);if(!a||!b)SetStatus("部分快捷键被其他程序占用，请使用托盘菜单");context.UpdateCrosshair();context.Timer.Update(context.Rounds.TimerSelected,context.Rounds.Error);if(context.Settings.TimerVisible&&!context.Fullscreen.Covering)context.Timer.Show();Tick();if(AutomaticUpdatesEnabled)foreach(var module in modules){var settings=module as SettingsModule;if(settings!=null)settings.StartAutoUpdate();}};
    Microsoft.Win32.SystemEvents.DisplaySettingsChanged+=DisplayChanged;ResizeEnd+=delegate{host.Invalidate(true);};
    ResumeLayout(false); using(var dpi=CreateGraphics()) { UiScale=dpi.DpiX/96f; if(UiScale!=1) Scale(new SizeF(UiScale,UiScale)); } ScaleColumns(this,UiScale);foreach(var module in modules)if(!(module is BroadcastModule))FitPage(module.View);
    var work=Screen.FromControl(this).WorkingArea;MinimumSize=new Size(Math.Min(MinimumSize.Width,work.Width),Math.Min(MinimumSize.Height,work.Height));Size=new Size(Math.Min(Width,work.Width),Math.Min(Height,work.Height));
@@ -39,11 +41,12 @@ namespace RxToolbox {
   void DisplayChanged(object s,EventArgs e){if(IsHandleCreated&&!IsDisposed)BeginInvoke((Action)delegate{context.UpdateCrosshair();});}
   public void SetStatus(string s){status.Text=Privacy.Redact(s);}
   internal void ShowToast(string message,Color color){toast.ShowMessage(message,color,host.Bounds,UiScale);}
+  internal void SetUpdateAvailable(bool available){updateBadge.Visible=available;}
   void SelectModule(int i){if(entering==modules[i].View)return;status.Text="";host.SuspendLayout();try{for(int k=0;k<modules.Count;k++){if(k!=i)modules[k].View.Hide();nav[k].Selected=k==i;nav[k].Invalidate();}modules[i].View.BringToFront();modules[i].View.Show();}finally{host.ResumeLayout(true);}entering=modules[i].View;animationStep=0;transition.Stop();transition.Tick-=Animate;transition.Tick+=Animate;entering.Dock=DockStyle.None;entering.Bounds=new Rectangle(18,0,host.Width,host.Height);transition.Start();modules[i].Tick();host.Refresh();modules[i].View.Refresh();}
   void Animate(object sender,EventArgs e){animationStep++;entering.Left=(int)(18*Math.Pow(1-Math.Min(1,animationStep/10f),3));if(animationStep>=10){transition.Stop();entering.Dock=DockStyle.Fill;}}
-  void Tick(){context.AutoJoin.Tick();foreach(var m in modules)m.Tick();if(context.Settings.TimerVisible)context.Timer.Update(context.Rounds.TimerSelected,context.Rounds.Error);if(DateTime.UtcNow>=nextPoll){nextPoll=DateTime.UtcNow.AddSeconds(Visible||context.Settings.TimerVisible?10:30);context.Rounds.Refresh(false);}}
+  void Tick(){context.AutoJoin.Tick();foreach(var m in modules)m.Tick();if(context.Settings.TimerVisible)context.Timer.Update(context.Rounds.TimerSelected,context.Rounds.Error);context.Fullscreen.Tick();if(DateTime.UtcNow>=nextPoll){nextPoll=DateTime.UtcNow.AddSeconds(Visible||context.Settings.TimerVisible?10:30);context.Rounds.Refresh(false);}}
   public void ToggleCrosshair(){context.Settings.CrosshairVisible=!context.Settings.CrosshairVisible;context.UpdateCrosshair();context.Save();foreach(var m in modules)m.Tick();}
-  public void ToggleTimer(){context.Settings.TimerVisible=!context.Settings.TimerVisible;context.Timer.Update(context.Rounds.TimerSelected,context.Rounds.Error);if(context.Settings.TimerVisible)context.Timer.Show();else context.Timer.Hide();context.Save();foreach(var m in modules)m.Tick();}
+  public void ToggleTimer(){context.Settings.TimerVisible=!context.Settings.TimerVisible;context.Timer.Update(context.Rounds.TimerSelected,context.Rounds.Error);if(context.Settings.TimerVisible&&!context.Fullscreen.Covering)context.Timer.Show();else context.Timer.Hide();context.Save();foreach(var m in modules)m.Tick();}
   public void Restore(){Show();WindowState=FormWindowState.Normal;Activate();}
   public void ExitForUpdate(){exit=true;Close();}
   public void EditTimer(){using(var editor=new TimerDesigner(context.Settings.TimerAppearance)){if(editor.ShowDialog(this)!=DialogResult.OK)return;context.Settings.TimerAppearance=editor.Appearance;context.Save();context.Timer.Update(context.Rounds.TimerSelected,context.Rounds.Error);}}
@@ -52,7 +55,7 @@ namespace RxToolbox {
    if(disposing&&!resourcesDisposed){
     resourcesDisposed=true;Microsoft.Win32.SystemEvents.DisplaySettingsChanged-=DisplayChanged;clock.Stop();clock.Dispose();transition.Dispose();
     if(tray!=null){var menu=tray.ContextMenuStrip;tray.ContextMenuStrip=null;tray.Visible=false;if(menu!=null)menu.Dispose();tray.Dispose();}
-    if(context!=null){if(IsHandleCreated){Native.UnregisterHotKey(Handle,1);Native.UnregisterHotKey(Handle,2);}foreach(var module in modules)module.Dispose();context.AutoJoin.Dispose();context.Rounds.Dispose();context.Crosshair.Dispose();context.Timer.Dispose();}
+    if(context!=null){if(IsHandleCreated){Native.UnregisterHotKey(Handle,1);Native.UnregisterHotKey(Handle,2);}foreach(var module in modules)module.Dispose();context.Fullscreen.Dispose();context.AutoJoin.Dispose();context.Rounds.Dispose();context.Crosshair.Dispose();context.Timer.Dispose();}
    }
    base.Dispose(disposing);
   }

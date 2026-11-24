@@ -1,5 +1,5 @@
 namespace RxToolbox {
  internal static class AppVersion {
-  internal const string Number="1.0.2.0";
+  internal const string Number="1.0.3.0";
  }
 }

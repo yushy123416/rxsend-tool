@@ -23,11 +23,14 @@ namespace RxToolbox {
  }
  internal class LayeredOverlay : Form {
   readonly bool passThrough;
+  internal Bitmap Surface;internal int SurfaceRevision;
+  protected override void Dispose(bool disposing){if(disposing&&Surface!=null){Surface.Dispose();Surface=null;}base.Dispose(disposing);}
   public LayeredOverlay(bool through) {passThrough=through;FormBorderStyle=FormBorderStyle.None;ShowInTaskbar=false;TopMost=true;StartPosition=FormStartPosition.Manual;AutoScaleMode=AutoScaleMode.None;}
   protected override bool ShowWithoutActivation {get{return true;}}
   protected override CreateParams CreateParams {get{var p=base.CreateParams;p.ExStyle|=0x80000|0x80|0x08000000;if(passThrough)p.ExStyle|=0x20;return p;}}
   protected override void WndProc(ref Message m) {if(m.Msg==0x21){m.Result=new IntPtr(3);return;}if(m.Msg==0x84){m.Result=new IntPtr(passThrough?-1:2);return;}base.WndProc(ref m);}
   protected void Present(Bitmap b,int x,int y,byte opacity=255) {
+   if(Surface!=null)Surface.Dispose();Surface=(Bitmap)b.Clone();SurfaceRevision++;
    IntPtr screen=Native.GetDC(IntPtr.Zero),dc=Native.CreateCompatibleDC(screen),bitmap=IntPtr.Zero,old=IntPtr.Zero;
    try {bitmap=b.GetHbitmap(Color.FromArgb(0));old=Native.SelectObject(dc,bitmap);var pos=new Native.Point(x,y);var size=new Native.Size(b.Width,b.Height);var src=new Native.Point(0,0);var blend=new Native.Blend{Alpha=opacity,Format=1};
     if(!Native.UpdateLayeredWindow(Handle,screen,ref pos,ref size,dc,ref src,0,ref blend,2))throw new System.ComponentModel.Win32Exception();

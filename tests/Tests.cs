@@ -211,6 +211,10 @@ namespace RxToolbox {
    PlayerQueryChecks();Task.Run((Func<Task>)ServerDetailsChecks).GetAwaiter().GetResult();
    SingleInstanceChecks();
    PrivacyChecks();
+   var fs=new Settings();Check(!FullscreenOverlay.IsAuthorized(fs),"fullscreen defaults off");
+   fs.ExperimentalFullscreen=true;Check(!FullscreenOverlay.IsAuthorized(fs),"fullscreen cannot activate without current risk consent");
+   fs.FullscreenConsentVersion=FullscreenRiskDialog.ConsentVersion;Check(FullscreenOverlay.IsAuthorized(Settings.FromJson(Json.Write(fs))),"confirmed fullscreen enable survives settings restart round trip");
+   fs.ExperimentalFullscreen=false;Check(!FullscreenOverlay.IsAuthorized(Settings.FromJson(Json.Write(fs))),"disabled fullscreen remains off after restart");
    BroadcastChecks();
    NvidiaChecks();
    var cs=CrosshairImport.Parse("CSvbPubOq37zTGqtsPTP5QTrp5CB4xFXiKRLfzJsm49ZRe");Check(cs.Red==255&&cs.Green==0&&cs.Blue==0&&cs.Length==5&&cs.Thickness==1&&cs.Dot&&cs.ReferenceHeight==768,"current CS2 reference vector");

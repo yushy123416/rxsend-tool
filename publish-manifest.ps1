@@ -28,13 +28,16 @@ if($UsePrepared){
     return
 }
 $githubUrl="https://github.com/$Repository/releases/download/v$version/RXSendTool.exe"
+$readme=Get-Content -LiteralPath (Join-Path $PSScriptRoot 'README.md') -Raw -Encoding UTF8
+$notes=[regex]::Match($readme,'(?ms)^### v'+[regex]::Escape($version)+'(?:[^\r\n]*)\r?\n(.*?)(?=^### |^## |\z)').Groups[1].Value.Trim()
+if(-not $notes){throw "README release notes missing: v$version"}
 & "$PSScriptRoot/tests/VerifyEndpointPrivacy.ps1" -ArtifactPath $exe
 $manifest=[ordered]@{
     version=$version
     url="https://gitee.com/$GiteeRepository/raw/main/updates/v$version/RXSendTool.exe"
     sha256=(Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash.ToLowerInvariant()
     mirrors=@(@($githubUrl)+$Mirrors | Select-Object -Unique)
-    notes="RXSend Tool $version"
+    notes=$notes
 }
 New-Item -ItemType Directory -Force (Split-Path $preparedExe) | Out-Null
 Copy-Item -LiteralPath $exe -Destination $preparedExe -Force

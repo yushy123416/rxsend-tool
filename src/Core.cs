@@ -47,6 +47,7 @@ namespace RxToolbox {
    set {ProtectedApiUrl=string.IsNullOrEmpty(value)||value==DefaultApi?null:Convert.ToBase64String(ProtectedData.Protect(Encoding.UTF8.GetBytes(HttpData.Https(value).AbsoluteUri),null,DataProtectionScope.CurrentUser));}
   }
   public string TimerServer="";
+  public bool ExperimentalFullscreen=false;public int FullscreenConsentVersion=0;
   public bool TimerVisible=false, CrosshairVisible=false, CloseToTray=true, AutoCheck=false;
   public int TimerX=32, TimerY=80, OffsetSeconds=0, CrosshairX=0, CrosshairY=0;
   public float CrosshairScale=2;
@@ -80,9 +81,9 @@ namespace RxToolbox {
   void Tick();
  }
  internal sealed class ToolContext {
-  public Settings Settings; public MainWindow Window; public RoundService Rounds; public CrosshairOverlay Crosshair; public TimerOverlay Timer;public AutoJoinService AutoJoin;
+  public Settings Settings; public MainWindow Window; public RoundService Rounds; public CrosshairOverlay Crosshair; public TimerOverlay Timer;public AutoJoinService AutoJoin;public FullscreenOverlay Fullscreen;
   public void Save() { try { Settings.Save(); } catch(Exception e) { Log.Write(e); Window.SetStatus("设置保存失败："+e.Message); } }
   public Screen Display { get { foreach(var s in Screen.AllScreens) if(s.DeviceName==Settings.ScreenDevice) return s; return Screen.PrimaryScreen; } }
-  public void UpdateCrosshair() { Crosshair.Update(Settings.Crosshair,Display.Bounds,Settings.CrosshairScale,Settings.CrosshairX,Settings.CrosshairY); if(Settings.CrosshairVisible) Crosshair.Show(); else Crosshair.Hide(); }
+  public void UpdateCrosshair() { Crosshair.Update(Settings.Crosshair,Display.Bounds,Settings.CrosshairScale,Settings.CrosshairX,Settings.CrosshairY); if(Settings.CrosshairVisible&&(Fullscreen==null||!Fullscreen.Covering)) Crosshair.Show(); else Crosshair.Hide(); }
  }
 }
