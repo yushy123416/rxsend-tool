@@ -93,7 +93,7 @@ namespace RxToolbox {
    var fullscreen=new CardPanel{Location=new System.Drawing.Point(0,432),Size=new System.Drawing.Size(936,238)};Page.Controls.Add(fullscreen);
    Ui.Label(fullscreen,"实验性全屏模式",24,16,560,34,Ui.Heading);
    Ui.Label(fullscreen,"让 64 位 GMod 全屏显示准星和回合计时；启用后重启工具自动恢复。",24,60,880,28,Ui.Small,Ui.Muted);
-   Ui.Label(fullscreen,"可能被反作弊拦截、引起崩溃或覆盖层冲突。开启前必须阅读并确认风险。",24,91,880,28,Ui.Small,Ui.Muted);
+   Ui.Label(fullscreen,"可能引起卡顿、崩溃或与其他游戏覆盖层冲突。开启前请阅读并确认。",24,91,880,28,Ui.Small,Ui.Muted);
    fullscreenToggle=Ui.Button(fullscreen,"开启实验模式",24,137,190,ToggleFullscreen,true);
    Ui.Button(fullscreen,"用途与风险",230,137,156,()=>{MessageBox.Show(C.Window,FullscreenRiskDialog.Explanation,"实验性全屏模式 · 用途与风险",MessageBoxButtons.OK,MessageBoxIcon.Warning);});
    fullscreenStatus=Ui.Label(fullscreen,"",24,190,888,30,Ui.Small,Ui.Muted);Tick();

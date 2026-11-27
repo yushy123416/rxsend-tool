@@ -39,12 +39,26 @@ namespace RxToolbox {
  }
  public sealed class Settings {
   public static string DefaultApi {get{return EndpointCatalog.Api;}}
+  public static string DefaultRelayApi {get{return EndpointCatalog.RelayApi;}}
   public static readonly string Folder=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"RxToolbox");
   public string SelectedServer="", GithubRepo=Updates.DefaultRepository, MirrorUrl=Updates.DefaultMirrorUrl, ScreenDevice="";
-  public string ProtectedApiUrl;
+  public string ProtectedApiUrl, ProtectedRelayApiUrl;
   [ScriptIgnore] public string ApiUrl {
-   get {if(string.IsNullOrEmpty(ProtectedApiUrl))return DefaultApi;try{return Encoding.UTF8.GetString(ProtectedData.Unprotect(Convert.FromBase64String(ProtectedApiUrl),null,DataProtectionScope.CurrentUser));}catch{throw new InvalidDataException("本机连接配置无法解密，请重置设置。");}}
-   set {ProtectedApiUrl=string.IsNullOrEmpty(value)||value==DefaultApi?null:Convert.ToBase64String(ProtectedData.Protect(Encoding.UTF8.GetBytes(HttpData.Https(value).AbsoluteUri),null,DataProtectionScope.CurrentUser));}
+   get {return ReadApiUrl(ProtectedApiUrl,DefaultApi);}
+   set {ProtectedApiUrl=ProtectApiUrl(value,DefaultApi,HttpData.Https);}
+  }
+  [ScriptIgnore] public string RelayApiUrl {
+   get {return ReadApiUrl(ProtectedRelayApiUrl,DefaultRelayApi);}
+   set {ProtectedRelayApiUrl=ProtectApiUrl(value,DefaultRelayApi,HttpData.RelayUri);}
+  }
+  static string ReadApiUrl(string value,string defaultUrl){
+   if(string.IsNullOrEmpty(value))return defaultUrl;
+   try{return Encoding.UTF8.GetString(ProtectedData.Unprotect(Convert.FromBase64String(value),null,DataProtectionScope.CurrentUser));}
+   catch{throw new InvalidDataException("本机连接配置无法解密，请重置设置。");}
+  }
+  static string ProtectApiUrl(string value,string defaultUrl,Func<string,Uri> validate){
+   if(string.IsNullOrEmpty(value)||value==defaultUrl)return null;
+   return Convert.ToBase64String(ProtectedData.Protect(Encoding.UTF8.GetBytes(validate(value).AbsoluteUri),null,DataProtectionScope.CurrentUser));
   }
   public string TimerServer="";
   public bool ExperimentalFullscreen=false;public int FullscreenConsentVersion=0;

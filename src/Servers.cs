@@ -31,20 +31,32 @@ namespace RxToolbox {
  }
  public static class HttpData {
   public static Uri Https(string value) { Uri u; if(!Uri.TryCreate(value,UriKind.Absolute,out u)||u.Scheme!="https"||!string.IsNullOrEmpty(u.UserInfo)) throw new InvalidDataException("请输入有效的 HTTPS 地址。"); return u; }
+  internal static Uri RelayUri(string value){
+   Uri url;
+   if(!Uri.TryCreate(value,UriKind.Absolute,out url)||(url.Scheme!=Uri.UriSchemeHttp&&url.Scheme!=Uri.UriSchemeHttps)||!string.IsNullOrEmpty(url.UserInfo)||!string.IsNullOrEmpty(url.Fragment))
+    throw new InvalidDataException("请输入有效的 HTTP 或 HTTPS 备用地址。");
+   return url;
+  }
   public static byte[] Get(string url,int limit,int timeout) {
-   var request=(HttpWebRequest)WebRequest.Create(Https(url)); request.Timeout=timeout; request.ReadWriteTimeout=timeout;
+   return Get(Https(url),limit,timeout);
+  }
+  static byte[] Get(Uri url,int limit,int timeout){
+   var request=(HttpWebRequest)WebRequest.Create(url); request.Timeout=timeout; request.ReadWriteTimeout=timeout;
    request.UserAgent="RxToolbox/1.0.0"; request.AutomaticDecompression=DecompressionMethods.GZip|DecompressionMethods.Deflate;
    request.CachePolicy=new System.Net.Cache.RequestCachePolicy(System.Net.Cache.RequestCacheLevel.NoCacheNoStore);
    using(var response=(HttpWebResponse)request.GetResponse()) {
-    Https(response.ResponseUri.AbsoluteUri);
+    if(url.Scheme==Uri.UriSchemeHttps)Https(response.ResponseUri.AbsoluteUri);
+    else RelayUri(response.ResponseUri.AbsoluteUri);
     if(response.ContentLength>limit) throw new InvalidDataException("响应超过大小限制。");
     using(var source=response.GetResponseStream()) using(var dest=new MemoryStream()) { var buffer=new byte[8192]; int n; while((n=source.Read(buffer,0,buffer.Length))>0) { if(dest.Length+n>limit) throw new InvalidDataException("响应超过大小限制。"); dest.Write(buffer,0,n); } return dest.ToArray(); }
    }
   }
   public static string Text(string url) { return Encoding.UTF8.GetString(Get(url,2*1024*1024,6000)); }
+  internal static string RelayText(string url){return Encoding.UTF8.GetString(Get(RelayUri(url),2*1024*1024,6000));}
  }
  internal sealed class RoundService : IDisposable {
   readonly Settings settings; readonly SemaphoreSlim gate=new SemaphoreSlim(3); bool busy,disposed; DateTime lastA2s=DateTime.MinValue;
+  readonly RoundFeedSource feedSource=new RoundFeedSource((url,viaRelay)=>viaRelay?HttpData.RelayText(url):HttpData.Text(url));
   public readonly List<ServerEntry> Servers=new List<ServerEntry>(); public string Error; public DateTime LastSuccess; public event Action Changed;
   public RoundService(Settings s) {settings=s;
    Servers.AddRange(EndpointCatalog.Servers);
@@ -57,23 +69,26 @@ namespace RxToolbox {
    return match!=null?match.Key:value.StartsWith("server-",StringComparison.Ordinal)?value:primary?Servers[0].Key:"";
   }
   public bool Busy {get {return busy;} }
+  RoundFeed ReadRoundFeed(){
+   string primary=null,relay=null;
+   try{primary=settings.ApiUrl;}catch(InvalidDataException ex){Log.Write(ex);}
+   try{relay=settings.RelayApiUrl;}catch(InvalidDataException ex){Log.Write(ex);}
+   return feedSource.Read(primary,relay,DateTime.UtcNow);
+  }
   public async void Refresh(bool force) {
    if(busy||disposed)return; busy=true;
    try {
-    var apiTask=Task.Run(delegate { string u=settings.ApiUrl; return Json.Read<ApiEnvelope>(HttpData.Text(u+(u.Contains("?")?"&":"?")+"_="+DateTime.UtcNow.Ticks)); });
+    var apiTask=Task.Run(()=>ReadRoundFeed());
     Task infoTask=Task.FromResult(0);
     if(force||(DateTime.UtcNow-lastA2s).TotalSeconds>=30) {lastA2s=DateTime.UtcNow; infoTask=Task.WhenAll(Servers.ToArray().Select(Query));}
     try {
-     var env=await apiTask;
-     if(env==null||env.servers==null||env.server_time<=0) throw new InvalidDataException("回合接口返回格式无效");
-     int accepted=0;
-     foreach(var row in env.servers.Take(128)) { IPAddress ip; if(row==null||!IPAddress.TryParse(row.ip,out ip)||row.port<1||row.port>65535||row.updated_at<=0||row.round_time_left< -1||row.round_time_left>86400) continue;
+     var feed=await apiTask;
+     foreach(var row in feed.Servers) {
       var server=Servers.FirstOrDefault(x=>x.Host==row.ip&&x.Port==row.port); if(server==null) {server=new ServerEntry{Host=row.ip,Port=row.port};Servers.Add(server);}
-      server.Name=Privacy.Redact(row.server_name)??server.Name; server.Round=RoundSnapshot.Create(row,env.server_time,DateTime.UtcNow); accepted++;
+      server.Name=Privacy.Redact(row.server_name)??server.Name; server.Round=RoundSnapshot.Create(row,feed.ServerTime,DateTime.UtcNow);
      }
-     if(accepted==0) throw new InvalidDataException("回合接口没有有效服务器数据");
      Error=null; LastSuccess=DateTime.UtcNow;
-    } catch(Exception ex) {Error=ex is WebException?"回合接口连接失败":"回合接口数据无效，请稍后重试";}
+    } catch(Exception ex) {Error=ex is WebException||ex is IOException?"回合接口连接失败":"回合接口数据无效，请稍后重试";}
     if(!disposed&&Changed!=null) Changed();
     await infoTask;
    } catch(Exception ex) { Error="服务器信息刷新失败，请稍后重试"; Log.Write(ex); }

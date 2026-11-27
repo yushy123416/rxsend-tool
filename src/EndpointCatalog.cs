@@ -9,9 +9,10 @@ using System.Text.RegularExpressions;
 namespace RxToolbox {
  // Embedded keys only obstruct static string extraction; they are not client-side secrets.
  internal static class EndpointCatalog {
-  internal sealed class Catalog { public string Api=null; public List<ServerEntry> Servers=null; }
+  internal sealed class Catalog { public string Api=null, RelayApi=null; public List<ServerEntry> Servers=null; }
   static readonly Catalog data=Read();
   internal static string Api {get{return data.Api;}}
+  internal static string RelayApi {get{return data.RelayApi;}}
   internal static IEnumerable<ServerEntry> Servers {get{return data.Servers.Select(s=>new ServerEntry{Host=s.Host,Port=s.Port,Name=s.Name});}}
   static Catalog Read(){
    try {
@@ -23,6 +24,7 @@ namespace RxToolbox {
      using(var decrypt=aes.CreateDecryptor()){
       var result=Json.Read<Catalog>(Encoding.UTF8.GetString(decrypt.TransformFinalBlock(bytes,0,bytes.Length)));
       HttpData.Https(result.Api);
+      if(!string.IsNullOrEmpty(result.RelayApi))HttpData.RelayUri(result.RelayApi);
       if(result.Servers==null||result.Servers.Count==0)throw new InvalidDataException();
       foreach(var server in result.Servers)SteamConnect.BuildUri(server.Host,server.Port);
       return result;

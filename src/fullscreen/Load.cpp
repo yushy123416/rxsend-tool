@@ -2,11 +2,12 @@
 #include <tlhelp32.h>
 #include <stdio.h>
 #include <wchar.h>
+#include "GameTarget.h"
 int wmain(int argc,wchar_t** argv){
  if(argc!=3){wprintf(L"Usage: Load.exe PID Overlay.dll\n");return 1;}
  DWORD pid=wcstoul(argv[1],nullptr,10);HANDLE p=OpenProcess(PROCESS_CREATE_THREAD|PROCESS_QUERY_INFORMATION|PROCESS_VM_OPERATION|PROCESS_VM_WRITE|PROCESS_VM_READ,FALSE,pid);
  if(!p){printf("OpenProcess failed %lu\n",GetLastError());return 2;}
- wchar_t image[MAX_PATH];DWORD count=MAX_PATH;if(!QueryFullProcessImageNameW(p,0,image,&count)||!wcsrchr(image,L'\\')||_wcsicmp(wcsrchr(image,L'\\')+1,L"gmod_win64.exe")){puts("Only gmod_win64.exe is allowed");CloseHandle(p);return 3;}
+ if(!IsAllowedGameProcess(p)){puts("Only verified x64 GMod (gmod.exe or gmod_win64.exe) is allowed");CloseHandle(p);return 3;}
  HMODULE local=GetModuleHandleW(L"kernel32.dll");auto proc=GetProcAddress(local,"LoadLibraryW");HMODULE owner=nullptr;
  GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS|GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,(LPCWSTR)proc,&owner);
  wchar_t ownerPath[MAX_PATH];GetModuleFileNameW(owner,ownerPath,MAX_PATH);const wchar_t* ownerName=wcsrchr(ownerPath,L'\\')+1;
@@ -19,5 +20,5 @@ int wmain(int argc,wchar_t** argv){
  HANDLE thread=CreateRemoteThread(p,nullptr,0,(LPTHREAD_START_ROUTINE)(remoteBase+((BYTE*)proc-(BYTE*)owner)),memory,0,nullptr);
  if(!thread){VirtualFreeEx(p,memory,0,MEM_RELEASE);CloseHandle(p);return 8;}
  DWORD wait=WaitForSingleObject(thread,15000);DWORD result=0;if(wait==WAIT_OBJECT_0){GetExitCodeThread(thread,&result);VirtualFreeEx(p,memory,0,MEM_RELEASE);}CloseHandle(thread);CloseHandle(p);
- printf("Load finished: wait=%lu result=%lu; inspect Overlay.log for actual rendering\n",wait,result);return wait==WAIT_OBJECT_0&&result?0:9;
+ printf("Load finished: wait=%lu result=%lu; inspect shared overlay status for actual rendering\n",wait,result);return wait==WAIT_OBJECT_0&&result?0:9;
 }

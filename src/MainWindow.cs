@@ -69,14 +69,15 @@ namespace RxToolbox {
  }
  internal sealed class RoundsModule : ToolModule {
   public override string Title{get{return "回合计时";}}public override string Symbol{get{return "◷";}}
-  readonly ListView list;readonly ImageList rowHeight;readonly Label time,name,phase,rounds,details;readonly FlatButton overlay,refresh;
+  readonly ListView list;readonly ImageList rowHeight;readonly Label time,name,phase,rounds,details,syncStatus;readonly FlatButton overlay,refresh;
   public RoundsModule(ToolContext c):base(c){
    Header("回合计时","服务器状态，一眼掌握。");
    var card=new CardPanel{Location=new Point(0,124),Size=new Size(936,160)};Page.Controls.Add(card);
    Ui.Label(card,"当前服务器",24,19,206,24,Ui.Small,Ui.Muted);name=Ui.Label(card,"娘娘测试服",24,52,208,36,Ui.Heading);
    phase=Ui.Label(card,"等待同步",24,105,184,26,Ui.Body,Ui.Accent);
    Ui.Line(card,244,29,1,100);time=Ui.Label(card,"--:--",266,28,242,88,Ui.Number,Ui.Accent);Ui.Label(card,"当前阶段剩余时间",277,118,225,22,Ui.Small,Ui.Muted);
-   Ui.Line(card,530,29,1,100);rounds=Ui.Label(card,"剩余回合  —",557,33,350,34,Ui.Heading);details=Ui.Label(card,"",557,81,350,56,Ui.Body,Ui.Muted);
+   Ui.Line(card,530,29,1,100);rounds=Ui.Label(card,"剩余回合  —",557,33,350,34,Ui.Heading);details=Ui.Label(card,"",557,81,350,50,Ui.Body,Ui.Muted);
+   syncStatus=Ui.Label(card,"",557,134,350,20,Ui.Small,Ui.Muted);
    overlay=Ui.Button(Page,"开启悬浮计时",0,304,182,()=>C.Window.ToggleTimer(),true);
    refresh=Ui.Button(Page,"刷新",196,304,100,()=>C.Rounds.Refresh(true));Ui.Label(Page,"时间补偿",322,309,80);Ui.Numeric(Page,407,305,C.Settings.OffsetSeconds,-300,300,v=>{C.Settings.OffsetSeconds=(int)v;C.Save();Tick();});Ui.Label(Page,"秒",530,309,32,28,Ui.Body,Ui.Muted);
    Ui.Button(Page,"悬浮窗样式",792,304,144,()=>C.Window.EditTimer());
@@ -105,6 +106,7 @@ namespace RxToolbox {
    var s=C.Rounds.Selected;var r=s==null?null:s.Round;name.Text=s==null?"选择服务器":s.ShortName;time.Text=Ui.Time(r==null?-1:r.Remaining(C.Settings.OffsetSeconds));
    phase.Text=r==null?"等待同步":r.Stale?"数据过期":Privacy.Redact(r.Data.round_phase);time.ForeColor=Ui.PhaseColor(phase.Text);rounds.Text="剩余回合  "+(r==null||r.Stale||r.Data.rounds_left<0?"—":r.Data.rounds_left.ToString());
    details.Text=s==null||s.Info==null?"":Privacy.Redact(s.Info.Map)+"\n"+s.Info.Players+" / "+s.Info.MaxPlayers+" 人";
+   syncStatus.Text=C.Rounds.Error??"";
    list.BeginUpdate();try{for(int i=0;i<list.Items.Count;i++){var e=C.Rounds.Servers[i];var q=e.Round;bool fresh=q!=null&&!q.Stale;string[] values={e.ShortName,q==null?"等待同步":q.Stale?"数据过期":Privacy.Redact(q.Data.round_phase),fresh&&q.Data.rounds_left>=0?q.Data.rounds_left.ToString():"—",Ui.Time(q==null?-1:q.Remaining(C.Settings.OffsetSeconds)),e.Info==null?"—":e.Info.Players+"/"+e.Info.MaxPlayers,e.InfoError!=null?"—":e.Info==null?"—":e.Info.Latency+" ms",e.Info==null?"—":Privacy.Redact(e.Info.Map)};for(int k=0;k<values.Length;k++)if(list.Items[i].SubItems[k].Text!=values[k])list.Items[i].SubItems[k].Text=values[k];}}finally{list.EndUpdate();}
   }
   public override void Dispose(){C.Rounds.Changed-=Changed;base.Dispose();rowHeight.Dispose();}

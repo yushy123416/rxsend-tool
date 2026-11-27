@@ -13,7 +13,7 @@ using System.Windows.Forms;
 namespace RxToolbox {
  internal sealed class FullscreenRiskDialog : Form {
   internal const int ConsentVersion=1;
-  internal const string Explanation="用途：让 64 位 GMod 在全屏模式下显示工具的准星和回合计时。仅支持 DirectX 9，属于实验性功能。\r\n\r\n风险：需要向游戏加载叠加模块，可能被游戏或服务器反作弊拦截，存在被踢出或账号处罚风险；不能保证安全或兼容。也可能引起崩溃、卡顿，或与 Steam、NVIDIA、Discord 等覆盖层冲突。\r\n\r\n限制：游戏内仅显示，不能拖动、右键或选服；请在工具主界面调整。尚未完成多服务器、长时间运行及切屏兼容验证。\r\n\r\n启用后会保存开关，下次启动工具时自动恢复，并在检测到 GMod 时加载。关闭后停止绘制，模块仍留在游戏进程内，退出 GMod 后才完全释放。";
+  internal const string Explanation="实验性全屏可在 64 位 GMod 的 DirectX 9 全屏画面中显示准星和回合计时。准星样式和计时服务器可在工具主界面调整。\r\n\r\n此功能需要向游戏加载叠加模块，可能引起卡顿、崩溃，或与 Steam、NVIDIA、Discord 的游戏覆盖层冲突。\r\n\r\n开启状态会自动保存。关闭后会停止显示，叠加模块会在退出 GMod 后释放。";
   internal FullscreenRiskDialog(){
    Text="实验性全屏模式 · 使用前确认";ClientSize=new Size(660,530);StartPosition=FormStartPosition.CenterParent;FormBorderStyle=FormBorderStyle.FixedDialog;MaximizeBox=false;MinimizeBox=false;BackColor=Ui.Bg;AutoScaleMode=AutoScaleMode.Dpi;
    Ui.Label(this,"请先了解用途与风险",24,18,610,38,Ui.Heading);
@@ -63,8 +63,10 @@ namespace RxToolbox {
   }
   async void FindGame(){
    int pid=0;try{
-   Process chosen=null;foreach(var p in Process.GetProcessesByName("gmod_win64")){if(p.MainWindowHandle!=IntPtr.Zero){if(chosen!=null){chosen.Dispose();p.Dispose();Status="检测到多个 GMod 窗口，请只保留一个";return;}chosen=p;}else p.Dispose();}
-   if(chosen==null){Status="已启用 · 等待启动 64 位 GMod";return;}
+   string reason;var targets=GmodProcess.FindTargets(out reason);
+   if(targets.Count>1){foreach(var target in targets)target.Dispose();Status="检测到多个 GMod 窗口，请只保留一个";return;}
+   Process chosen=targets.Count==1?targets[0]:null;
+   if(chosen==null){Status=reason??"已启用 · 等待启动 64 位 GMod";return;}
    if(chosen.Id==failedPid){chosen.Dispose();return;}
    game=chosen;pid=game.Id;gate=new Mutex(false,"Local\\RxFullscreen-lock-v1-"+pid);map=MemoryMappedFile.CreateOrOpen("Local\\RxFullscreen-v1-"+pid,Capacity);view=map.CreateViewAccessor();crossRevision=timerRevision=-1;crossVisible=timerVisible=false;
    loading=true;Status="正在连接 GMod…";
