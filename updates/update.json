@@ -1,9 +1,9 @@
 {
-  "version": "1.0.3",
-  "url": "https://gitee.com/ysyyyy/rxsend-tool/raw/main/updates/v1.0.3/RXSendTool.exe",
-  "sha256": "376161df3f6d067c9470427af0cd2ad9d2c114de85ae22ea005e502cc708a291",
+  "version": "1.0.4",
+  "url": "https://gitee.com/ysyyyy/rxsend-tool/raw/main/updates/v1.0.4/RXSendTool.exe",
+  "sha256": "cfa127a56e29fbaaea0c996b2d9d480871a7413c984ac730014a39870867b822",
   "mirrors": [
-    "https://github.com/yushy123416/rxsend-tool/releases/download/v1.0.3/RXSendTool.exe"
+    "https://github.com/yushy123416/rxsend-tool/releases/download/v1.0.4/RXSendTool.exe"
   ],
-  "notes": "- 更新前显示公告，由用户选择“立即更新”或“暂不更新”；关闭弹窗与默认 Enter / Esc 均不触发升级。\n- 发现新版后，在左上角当前版本号旁显示可点击的红底白字“有新版本”，随时重新打开公告。\n- 公告采用浅色布局，标题与版本号同行；优先读取 Gitee Release 发布说明，失败时回退 GitHub，API 不可用时尝试公开发布页，离线时使用更新清单中的说明。支持标题、列表、链接、折叠段落、长内容滚动及“前往发布页”。\n- 下载或安装失败后保留新版提醒，重新确认后可继续更新，已校验的下载文件可复用。\n- 发布清单自动提取对应版本的 README 更新日志作为公告正文。\n- 新增实验性 GMod 全屏模式：在 64 位 DirectX 9 游戏画面内显示现有准星和回合计时，与桌面浮窗自动切换，保留原有开关及快捷键。\n- 全屏模式默认关闭，需明确确认用途与风险后启用；启用状态可保存，手动关闭后再次开启仍需确认。此功能可能触发反作弊、引起崩溃或覆盖层冲突，多服务器、长时间运行及切屏兼容性仍待验证。"
+  "notes": "- 解决了gmod视频设置为全屏时无法使用屏幕准星和悬浮窗的问题。\n- 修复实验性全屏只识别 `gmod_win64.exe`，遗漏实际为 x64 的 `gmod.exe`，导致开关已启用却始终等待游戏的问题。\n- 工具与原生加载器统一支持两种进程名，并校验实际 AMD64 架构及 GMod 安装标记；后台辅助进程不作为游戏窗口，多个有效窗口仍提示只保留一个。"
 }
